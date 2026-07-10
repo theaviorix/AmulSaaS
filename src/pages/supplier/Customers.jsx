@@ -1,8 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Users, Copy, Check, Share2, Bell, PackageX, IndianRupee, Send, BellRing, ScrollText } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { useSession } from '@/lib/AppSession';
+import { supabase } from '@/lib/supabaseClient';
+import { generateFreeInviteCode } from '@/lib/inviteCode';
 import { inr } from '@/lib/store';
 import { notify } from '@/lib/notify';
 import PageHeader from '@/components/PageHeader';
@@ -22,7 +24,88 @@ export default function SupplierCustomers() {
   const store = useStore();
   const { session } = useSession();
   const uid = session.userId;
-  const profile = store.find('supplier_profiles', (s) => s.id === session.profileId);
+
+  // The supplier's own profile (business name + invite code) now lives in
+  // Supabase, not the local store — Onboarding writes it there. Fetch it
+  // directly so the invite code banner is never stuck showing "undefined".
+  const [profile, setProfile] = useState(null);
+  const [profileError, setProfileError] = useState('');
+  const [profileLoading, setProfileLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    setProfileLoading(true);
+    setProfileError('');
+
+    async function loadProfile() {
+      // Prefer the id from the session; fall back to looking the row up
+      // by user_id in case profileId wasn't populated on this session.
+      let row = null;
+      let lastError = null;
+
+      if (session.profileId) {
+        const { data, error } = await supabase
+          .from('supplier_profiles')
+          .select('*')
+          .eq('id', session.profileId)
+          .maybeSingle();
+        if (error) lastError = error;
+        row = data;
+      }
+
+      if (!row && uid) {
+        const { data, error } = await supabase
+          .from('supplier_profiles')
+          .select('*')
+          .eq('user_id', uid)
+          .maybeSingle();
+        if (error) lastError = error;
+        row = data;
+      }
+
+      if (!active) return;
+      if (row) {
+        if (!row.invite_code) {
+          // Data-level gap, not a fetch bug: this row exists but was never
+          // given an invite code (e.g. created before that logic existed).
+          // Generate one now and persist it so it's fixed for good.
+          try {
+            const code = await generateFreeInviteCode(row.business_name);
+            const { data: updated, error: updateError } = await supabase
+              .from('supplier_profiles')
+              .update({ invite_code: code })
+              .eq('id', row.id)
+              .select()
+              .single();
+            if (updateError) throw updateError;
+            row = updated;
+          } catch (healErr) {
+            // eslint-disable-next-line no-console
+            console.error('Could not generate a missing invite code.', healErr);
+            setProfileError(`This profile has no invite code and one couldn't be generated (${healErr.message || 'unknown error'}).`);
+          }
+        }
+        setProfile(row);
+      } else {
+        // eslint-disable-next-line no-console
+        console.error('Could not load supplier profile for invite code.', {
+          profileId: session.profileId,
+          userId: uid,
+          error: lastError,
+        });
+        setProfileError(
+          lastError
+            ? `Couldn't load your invite code (${lastError.message || lastError.code || 'unknown error'}).`
+            : "Couldn't find your supplier profile."
+        );
+      }
+      setProfileLoading(false);
+    }
+
+    loadProfile();
+    return () => { active = false; };
+  }, [session.profileId, uid]);
+
   const links = store.filter('supplier_links', (l) => l.supplier_user_id === uid);
   const pending = links.filter((l) => l.status === 'pending');
   const activeAll = links.filter((l) => l.status === 'active');
@@ -85,13 +168,19 @@ export default function SupplierCustomers() {
       <div className="rounded-2xl bg-jet text-surface p-5">
         <p className="text-xs uppercase tracking-widest text-surface/60">Your invite code</p>
         <div className="mt-2 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
-          <p className="font-mono text-3xl font-semibold tracking-wide">{profile?.invite_code}</p>
+          <p className="font-mono text-3xl font-semibold tracking-wide">
+            {profileLoading ? '···' : profile?.invite_code || '—'}
+          </p>
           <div className="flex gap-2">
             <CopyButton text={profile?.invite_code} />
             <ShareButton code={profile?.invite_code} business={profile?.business_name} />
           </div>
         </div>
-        <p className="mt-3 text-sm text-surface/60">Share this with your retailers so they can link to your price list.</p>
+        {profileError ? (
+          <p className="mt-3 text-sm text-red-300">{profileError}</p>
+        ) : (
+          <p className="mt-3 text-sm text-surface/60">Share this with your retailers so they can link to your price list.</p>
+        )}
       </div>
 
       {pending.length > 0 && (
