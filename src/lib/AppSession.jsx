@@ -1,4 +1,6 @@
-import { createContext, useContext, useState, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { supabase } from './supabaseClient';
+import { getSession, onAuthStateChange, getMyProfile } from './supabaseAuth';
 
 const SessionContext = createContext(null);
 
@@ -6,64 +8,76 @@ export function useSession() {
   return useContext(SessionContext);
 }
 
-const STORAGE_KEY = 'amul_connect_session';
+// Builds the app-facing session shape (role, profileId, and — for
+// customers — their linked supplier's ids) from a Supabase auth user.
+async function buildSession(authUser) {
+  if (!authUser) return null;
+  const { profile, roleProfile } = await getMyProfile(authUser.id);
 
-function loadSession() {
-  try {
-    // Prefer a persisted (remember-me) session; fall back to a
-    // this-tab-only session.
-    const persisted = localStorage.getItem(STORAGE_KEY);
-    if (persisted) return JSON.parse(persisted);
-    const temp = sessionStorage.getItem(STORAGE_KEY);
-    return temp ? JSON.parse(temp) : null;
-  } catch {
-    return null;
+  const base = {
+    userId: authUser.id,
+    accountId: authUser.id, // kept for pages still expecting the old field name
+    email: authUser.email,
+    role: profile.role || null,
+    profileId: roleProfile?.id || null,
+  };
+
+  if (profile.role === 'customer' && roleProfile) {
+    const { data: link } = await supabase
+      .from('supplier_links')
+      .select('id, supplier_user_id, supplier_profile_id')
+      .eq('customer_profile_id', roleProfile.id)
+      .maybeSingle();
+    if (link) {
+      base.linkId = link.id;
+      base.supplierUserId = link.supplier_user_id;
+      base.supplierProfileId = link.supplier_profile_id;
+    }
   }
-}
 
-export function getStoredSession() {
-  return loadSession();
+  return base;
 }
 
 export function SessionProvider({ children }) {
-  const [session, setSessionState] = useState(loadSession);
+  const [session, setSessionState] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  // Accepts either a plain session object, or an updater function (prevSession) => nextSession,
-  // and always persists the *resolved* value. Pass `remember: false` in the
-  // session object to keep it only for this browser tab/session instead of
-  // persisting across restarts.
-  const setSession = useCallback((updater) => {
-    setSessionState((prev) => {
-      const next = typeof updater === 'function' ? updater(prev) : updater;
-      // Always clear both stores first so switching remember-me on/off
-      // (or logging out) never leaves a stale copy behind in the other one.
-      localStorage.removeItem(STORAGE_KEY);
-      sessionStorage.removeItem(STORAGE_KEY);
-      if (next) {
-        const remember = next.remember !== false;
-        (remember ? localStorage : sessionStorage).setItem(STORAGE_KEY, JSON.stringify(next));
-      }
-      return next;
-    });
+  const refreshSession = useCallback(async () => {
+    const authSession = await getSession();
+    const next = await buildSession(authSession?.user || null);
+    setSessionState(next);
+    return next;
   }, []);
 
-  const updateSession = useCallback((patch) => {
-    setSession((prev) => (prev ? { ...prev, ...patch } : prev));
-  }, [setSession]);
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const authSession = await getSession();
+      const next = await buildSession(authSession?.user || null);
+      if (active) {
+        setSessionState(next);
+        setLoading(false);
+      }
+    })();
+
+    const unsubscribe = onAuthStateChange(async (authSession) => {
+      const next = await buildSession(authSession?.user || null);
+      if (active) setSessionState(next);
+    });
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
 
   const clearSession = useCallback(() => {
-    localStorage.removeItem(STORAGE_KEY);
-    sessionStorage.removeItem(STORAGE_KEY);
     setSessionState(null);
   }, []);
 
   return (
-    <SessionContext.Provider value={{ session, setSession, updateSession, clearSession }}>
+    <SessionContext.Provider value={{ session, loading, refreshSession, clearSession }}>
       {children}
     </SessionContext.Provider>
   );
-}
-
-export function generateUserId() {
-  return 'sess_' + (crypto.randomUUID?.() || Date.now().toString(36) + Math.random().toString(36).slice(2));
 }

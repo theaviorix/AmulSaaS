@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { LayoutDashboard, ClipboardList, Boxes, Users, Wallet, ShoppingCart, Package, LogOut, Menu, X, MessageCircle, Table2 } from 'lucide-react';
 import { useSession } from '@/lib/AppSession';
+import { signOut } from '@/lib/supabaseAuth';
+import { supabase } from '@/lib/supabaseClient';
 import { useStore } from '@/lib/useStore';
 import { store } from '@/lib/store';
 import { checkAndFireReminder } from '@/lib/orderReminder';
@@ -56,7 +58,7 @@ function Sidebar({ nav, onLogoutClick, unreadMessages, avatar, displayName }) {
 }
 
 export default function AppShell() {
-  const { session, clearSession } = useSession();
+  const { session, loading, clearSession } = useSession();
   const liveStore = useStore();
   const navigate = useNavigate();
   const location = useLocation();
@@ -75,18 +77,28 @@ export default function AppShell() {
     setTimeout(() => setDrawer(false), 250);
   };
 
-  let avatar = null;
-  let displayName = '';
+  const [myProfile, setMyProfile] = useState(null);
+  useEffect(() => {
+    if (!session?.role || !session?.profileId) { setMyProfile(null); return; }
+    const table = session.role === 'supplier' ? 'supplier_profiles' : 'customer_profiles';
+    let active = true;
+    const load = async () => {
+      const { data } = await supabase.from(table).select('avatar, business_name, shop_name').eq('id', session.profileId).single();
+      if (active) setMyProfile(data || null);
+    };
+    load();
+    // Lightweight refresh so an avatar/name change made in EditProfile
+    // shows up here without needing a full page reload.
+    const id = setInterval(load, 15000);
+    return () => { active = false; clearInterval(id); };
+  }, [session?.role, session?.profileId]);
+
+  let avatar = myProfile?.avatar || null;
+  let displayName = session?.role === 'supplier' ? myProfile?.business_name : myProfile?.shop_name;
   let unreadMessages = 0;
   if (session?.role === 'supplier') {
-    const profile = liveStore.find('supplier_profiles', (s) => s.id === session.profileId);
-    avatar = profile?.avatar;
-    displayName = profile?.business_name;
     unreadMessages = liveStore.filter('messages', (m) => m.supplier_user_id === session.userId && m.sender === 'customer' && !m.read_by_supplier).length;
   } else if (session?.role === 'customer') {
-    const profile = liveStore.find('customer_profiles', (c) => c.id === session.profileId);
-    avatar = profile?.avatar;
-    displayName = profile?.shop_name;
     unreadMessages = liveStore.filter('messages', (m) => m.customer_user_id === session.userId && m.sender === 'supplier' && !m.read_by_customer).length;
   }
 
@@ -105,14 +117,22 @@ export default function AppShell() {
     return () => clearInterval(id);
   }, [session]);
 
-  if (!session) return <Navigate to="/onboarding" replace />;
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-canvas grid place-items-center">
+        <div className="w-8 h-8 border-4 border-mist border-t-ink rounded-full animate-spin" />
+      </div>
+    );
+  }
+  if (!session) return <Navigate to="/login" replace />;
+  if (!session.role || !session.profileId) return <Navigate to="/onboarding" replace />;
   const isProfileArea = location.pathname.startsWith('/profile');
   const isSupplierArea = location.pathname.startsWith('/supplier');
   if (!isProfileArea && session.role === 'customer' && isSupplierArea) return <Navigate to="/customer/new-order" replace />;
   if (!isProfileArea && session.role === 'supplier' && !isSupplierArea) return <Navigate to="/supplier" replace />;
   const nav = NAV[session.role] || [];
   const roleLabel = session.role === 'supplier' ? 'Supplier' : 'Retailer';
-  const doLogout = () => { setConfirmLogout(false); clearSession(); navigate('/'); };
+  const doLogout = async () => { setConfirmLogout(false); await signOut(); clearSession(); navigate('/'); };
 
   return (
     <div className="min-h-screen bg-canvas">
@@ -167,11 +187,11 @@ export default function AppShell() {
       </Modal>
 
       <div className="lg:pl-64">
-        <header className="hidden lg:flex h-16 items-center justify-between px-6 bg-surface/60 backdrop-blur border-b border-mist">
+        <header className="hidden lg:flex relative z-30 h-16 items-center justify-between px-6 bg-surface/60 backdrop-blur border-b border-mist">
           <span className="text-xs font-mono uppercase tracking-widest text-ink2">{roleLabel} workspace</span>
           <NotificationBell />
         </header>
-        <div className="lg:hidden flex items-center justify-end px-4 py-2"><NotificationBell /></div>
+        <div className="lg:hidden relative z-30 flex items-center justify-end px-4 py-2"><NotificationBell /></div>
         <main className="p-4 sm:p-6 max-w-6xl mx-auto w-full"><Outlet /></main>
       </div>
     </div>

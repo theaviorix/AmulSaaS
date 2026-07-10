@@ -1,7 +1,7 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { useSession } from '@/lib/AppSession';
-import { store } from '@/lib/store';
-import { accounts } from '@/lib/accounts';
+import { supabase } from '@/lib/supabaseClient';
+import { signIn, updatePassword } from '@/lib/supabaseAuth';
 import { toast } from '@/components/ui/use-toast';
 import { compressImageFile } from '@/lib/exportUtils';
 import Avatar from '@/components/Avatar';
@@ -28,28 +28,13 @@ function Field({ label, value, onChange, placeholder, type = 'text', required, r
 }
 
 export default function EditProfile() {
-  const { session, updateSession } = useSession();
+  const { session } = useSession();
   const isSupplier = session?.role === 'supplier';
-
   const table = isSupplier ? 'supplier_profiles' : 'customer_profiles';
-  const profile = store.get(table, session?.profileId);
 
-  const [form, setForm] = useState(() =>
-    isSupplier
-      ? {
-          business_name: profile?.business_name || '',
-          owner_name: profile?.owner_name || '',
-          phone: profile?.phone || '',
-          address: profile?.address || '',
-          gstin: profile?.gstin || '',
-        }
-      : {
-          shop_name: profile?.shop_name || '',
-          owner_name: profile?.owner_name || '',
-          phone: profile?.phone || '',
-          address: profile?.address || '',
-        }
-  );
+  const [profile, setProfile] = useState(null);
+  const [loadingProfile, setLoadingProfile] = useState(true);
+  const [form, setForm] = useState(null);
   const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
   const [savingProfile, setSavingProfile] = useState(false);
 
@@ -58,9 +43,32 @@ export default function EditProfile() {
   const [savingPw, setSavingPw] = useState(false);
 
   const [avatarUploading, setAvatarUploading] = useState(false);
-  const [avatar, setAvatar] = useState(profile?.avatar || null);
   const fileInputRef = useRef(null);
 
+  useEffect(() => {
+    if (!session?.profileId) return;
+    let active = true;
+    (async () => {
+      const { data, error } = await supabase.from(table).select('*').eq('id', session.profileId).single();
+      if (!active) return;
+      if (error) {
+        toast({ title: 'Could not load your profile', description: error.message });
+        setLoadingProfile(false);
+        return;
+      }
+      setProfile(data);
+      setForm(isSupplier
+        ? { business_name: data.business_name || '', owner_name: data.owner_name || '', phone: data.phone || '', address: data.address || '', gstin: data.gstin || '' }
+        : { shop_name: data.shop_name || '', owner_name: data.owner_name || '', phone: data.phone || '', address: data.address || '' }
+      );
+      setLoadingProfile(false);
+    })();
+    return () => { active = false; };
+  }, [session?.profileId, table, isSupplier]);
+
+  if (loadingProfile) {
+    return <div className="w-8 h-8 border-4 border-mist border-t-ink rounded-full animate-spin" />;
+  }
   if (!profile) {
     return <p className="text-sm text-ink2">Profile not found.</p>;
   }
@@ -74,8 +82,9 @@ export default function EditProfile() {
     setAvatarUploading(true);
     try {
       const dataUrl = await compressImageFile(file);
-      store.update(table, profile.id, { avatar: dataUrl });
-      setAvatar(dataUrl);
+      const { error } = await supabase.from(table).update({ avatar: dataUrl }).eq('id', profile.id);
+      if (error) throw error;
+      setProfile((p) => ({ ...p, avatar: dataUrl }));
       toast({ title: 'Profile photo updated' });
     } catch (err) {
       toast({ title: 'Could not use this photo', description: err.message || 'Try a different image.' });
@@ -84,50 +93,49 @@ export default function EditProfile() {
     }
   };
 
-  const removeAvatar = () => {
-    store.update(table, profile.id, { avatar: null });
-    setAvatar(null);
+  const removeAvatar = async () => {
+    const { error } = await supabase.from(table).update({ avatar: null }).eq('id', profile.id);
+    if (error) {
+      toast({ title: 'Could not remove photo', description: error.message });
+      return;
+    }
+    setProfile((p) => ({ ...p, avatar: null }));
     toast({ title: 'Profile photo removed' });
   };
 
-  const saveProfile = (e) => {
+  const saveProfile = async (e) => {
     e.preventDefault();
     setSavingProfile(true);
-    store.update(table, profile.id, form);
-    setSavingProfile(false);
-    toast({ title: 'Profile updated', description: 'Your changes have been saved.' });
+    try {
+      const { error } = await supabase.from(table).update(form).eq('id', profile.id);
+      if (error) throw error;
+      setProfile((p) => ({ ...p, ...form }));
+      toast({ title: 'Profile updated', description: 'Your changes have been saved.' });
+    } catch (err) {
+      toast({ title: 'Could not save', description: err.message });
+    } finally {
+      setSavingProfile(false);
+    }
   };
 
-  const savePassword = (e) => {
+  const savePassword = async (e) => {
     e.preventDefault();
     setPwError('');
-    if (!session?.accountId) {
-      setPwError('No account found for this session.');
-      return;
-    }
-    const account = accounts.get(session.accountId);
-    if (!account) {
-      setPwError('No account found for this session.');
-      return;
-    }
-    try {
-      // verify current password by attempting a login check
-      accounts.login(account.email, pw.current);
-    } catch {
-      setPwError('Current password is incorrect');
-      return;
-    }
     if (pw.next !== pw.confirm) {
       setPwError('New passwords do not match');
       return;
     }
     setSavingPw(true);
     try {
-      accounts.updatePassword(account.id, pw.next);
+      // Re-authenticate with the current password first, so this can't be
+      // used to change the password without knowing the existing one.
+      await signIn(session.email, pw.current);
+      await updatePassword(pw.next);
       setPw({ current: '', next: '', confirm: '' });
       toast({ title: 'Password changed', description: 'Use your new password next time you log in.' });
     } catch (err) {
-      setPwError(err.message || 'Failed to change password');
+      const msg = (err.message || '').toLowerCase();
+      setPwError(msg.includes('credentials') || msg.includes('invalid') ? 'Current password is incorrect' : (err.message || 'Failed to change password'));
     } finally {
       setSavingPw(false);
     }
@@ -153,7 +161,7 @@ export default function EditProfile() {
 
       <div className="rounded-2xl border border-mist bg-surface p-6 shadow-sm flex items-center gap-5">
         <div className="relative w-20 h-20 shrink-0 grow-0">
-          <Avatar src={avatar} name={displayName} size="lg" />
+          <Avatar src={profile.avatar} name={displayName} size="lg" />
           {avatarUploading && (
             <span className="absolute inset-0 rounded-full bg-ink/40 grid place-items-center">
               <Loader2 size={18} className="animate-spin text-surface" />
@@ -165,9 +173,9 @@ export default function EditProfile() {
           <p className="text-xs text-ink2">Shown to your {isSupplier ? 'retailers' : 'supplier'} in chat and history.</p>
           <div className="flex gap-2 flex-wrap">
             <button type="button" onClick={() => fileInputRef.current?.click()} disabled={avatarUploading} className="inline-flex items-center gap-1.5 text-xs font-medium bg-jet text-surface px-3 py-2 rounded-lg hover:bg-ink transition-colors disabled:opacity-50">
-              <Camera size={13} /> {avatar ? 'Change photo' : 'Upload photo'}
+              <Camera size={13} /> {profile.avatar ? 'Change photo' : 'Upload photo'}
             </button>
-            {avatar && (
+            {profile.avatar && (
               <button type="button" onClick={removeAvatar} className="inline-flex items-center gap-1.5 text-xs font-medium border border-mist text-ink2 px-3 py-2 rounded-lg hover:bg-canvas hover:text-alert transition-colors">
                 <Trash2 size={13} /> Remove
               </button>

@@ -1,21 +1,19 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { accounts } from "@/lib/accounts";
-import { store } from "@/lib/store";
-import { requestOTP } from "@/lib/otp";
+import { signIn } from "@/lib/supabaseAuth";
 import { useSession } from "@/lib/AppSession";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { LogIn, Mail, Lock, Loader2 } from "lucide-react";
+import { LogIn, Mail, Lock, Loader2, Eye, EyeOff } from "lucide-react";
 import AuthLayout from "@/components/AuthLayout";
 
 export default function Login() {
   const navigate = useNavigate();
-  const { setSession } = useSession();
+  const { refreshSession } = useSession();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [remember, setRemember] = useState(true);
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -23,57 +21,18 @@ export default function Login() {
     e.preventDefault();
     setError("");
     setLoading(true);
-    // Read straight from the form as a fallback: some mobile browsers /
-    // password managers autofill inputs at the DOM level without firing
-    // React's onChange, which previously left the email/password state
-    // empty (and login failing with "Invalid email or password") even
-    // though the fields looked filled in on screen.
-    const data = new FormData(e.target);
-    const finalEmail = (data.get("email") || email || "").toString();
-    const finalPassword = (data.get("password") || password || "").toString();
     try {
-      const account = accounts.login(finalEmail, finalPassword);
-
-      if (!account.role || !account.profileId) {
-        // Registered but never finished setting up their business/shop profile.
-        navigate(`/onboarding?accountId=${account.id}`);
+      await signIn(email, password);
+      const session = await refreshSession();
+      if (!session?.role || !session?.profileId) {
+        navigate("/onboarding");
         return;
       }
-
-      if (account.role === "supplier") {
-        setSession({
-          accountId: account.id,
-          email: account.email,
-          role: "supplier",
-          userId: account.userId,
-          profileId: account.profileId,
-          remember,
-        });
-        navigate("/supplier");
-        return;
-      }
-
-      // customer: also restore the supplier link info the dashboard needs
-      const link = store.find(
-        "supplier_links",
-        (l) => l.customer_profile_id === account.profileId
-      );
-      setSession({
-        accountId: account.id,
-        email: account.email,
-        role: "customer",
-        userId: account.userId,
-        profileId: account.profileId,
-        linkId: link?.id,
-        supplierUserId: link?.supplier_user_id,
-        supplierProfileId: link?.supplier_profile_id,
-        remember,
-      });
-      navigate("/customer/new-order");
+      navigate(session.role === "supplier" ? "/supplier" : "/customer/new-order");
     } catch (err) {
-      if (err.code === "EMAIL_NOT_VERIFIED") {
-        const code = requestOTP(`email:${finalEmail.trim().toLowerCase()}`);
-        navigate(`/verify-email?accountId=${err.accountId}&demoCode=${code}`);
+      const msg = err.message?.toLowerCase() || "";
+      if (msg.includes("email not confirmed") || msg.includes("not confirmed")) {
+        navigate(`/verify-email?email=${encodeURIComponent(email.trim().toLowerCase())}`);
         return;
       }
       setError(err.message || "Invalid email or password");
@@ -132,25 +91,19 @@ export default function Login() {
             <Input
               id="password"
               name="password"
-              type="password"
+              type={showPassword ? "text" : "password"}
               autoComplete="current-password"
               placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="pl-10 h-12"
+              className="pl-10 pr-10 h-12"
               required
             />
+            <button type="button" onClick={() => setShowPassword((s) => !s)} tabIndex={-1} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label={showPassword ? "Hide password" : "Show password"}>
+              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
           </div>
         </div>
-        <label className="flex items-center gap-2 text-sm text-muted-foreground select-none cursor-pointer">
-          <input
-            type="checkbox"
-            checked={remember}
-            onChange={(e) => setRemember(e.target.checked)}
-            className="w-4 h-4 rounded border-mist accent-primary"
-          />
-          Remember me
-        </label>
         <Button type="submit" className="w-full h-12 font-medium" disabled={loading}>
           {loading ? (
             <>

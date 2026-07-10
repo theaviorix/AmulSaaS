@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
-import { accounts } from "@/lib/accounts";
-import { requestOTP, verifyOTP } from "@/lib/otp";
+import { verifySignupOtp, resendSignupOtp } from "@/lib/supabaseAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,21 +10,17 @@ import AuthLayout from "@/components/AuthLayout";
 export default function VerifyEmail() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const accountId = params.get("accountId");
+  const email = params.get("email") || "";
   const roleParam = params.get("role");
-  const account = accountId ? accounts.get(accountId) : null;
 
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  // Demo-mode only: there's no email server wired up, so the code that
-  // would normally be emailed is shown directly here instead.
-  const [demoCode, setDemoCode] = useState(params.get("demoCode") || "");
   const [resent, setResent] = useState(false);
 
-  if (!account) {
+  if (!email) {
     return (
-      <AuthLayout icon={MailCheck} title="Link expired" subtitle="This verification link is no longer valid.">
+      <AuthLayout icon={MailCheck} title="Missing email" subtitle="Please sign up again.">
         <Link to="/register" className="text-primary font-medium hover:underline text-sm">
           Back to sign up
         </Link>
@@ -33,15 +28,14 @@ export default function VerifyEmail() {
     );
   }
 
-  const handleVerify = (e) => {
+  const handleVerify = async (e) => {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
-      verifyOTP(`email:${account.email}`, code);
-      accounts.markEmailVerified(account.id);
-      const roleQuery = roleParam ? `&role=${roleParam}` : "";
-      navigate(`/onboarding?accountId=${account.id}${roleQuery}`);
+      await verifySignupOtp(email, code);
+      const roleQuery = roleParam ? `?role=${roleParam}` : "";
+      navigate(`/onboarding${roleQuery}`);
     } catch (err) {
       setError(err.message || "Verification failed");
     } finally {
@@ -49,11 +43,10 @@ export default function VerifyEmail() {
     }
   };
 
-  const handleResend = () => {
+  const handleResend = async () => {
     setError("");
     try {
-      const newCode = requestOTP(`email:${account.email}`);
-      setDemoCode(newCode);
+      await resendSignupOtp(email);
       setResent(true);
       setTimeout(() => setResent(false), 3000);
     } catch (err) {
@@ -65,7 +58,7 @@ export default function VerifyEmail() {
     <AuthLayout
       icon={MailCheck}
       title="Confirm your email"
-      subtitle={`Enter the 6-digit code to verify ${account.email}`}
+      subtitle={`Enter the 6-digit code we sent to ${email}`}
       footer={
         <>
           Wrong email?{" "}
@@ -75,11 +68,6 @@ export default function VerifyEmail() {
         </>
       }
     >
-      {demoCode && (
-        <div className="mb-4 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">
-          <strong>Demo mode:</strong> no email server is connected yet, so here's your code: <span className="font-mono font-semibold">{demoCode}</span>
-        </div>
-      )}
       {error && (
         <div className="mb-4 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
           {error}
@@ -87,7 +75,7 @@ export default function VerifyEmail() {
       )}
       {resent && (
         <div className="mb-4 p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm">
-          A new code was generated.
+          A new code was sent to your email.
         </div>
       )}
 

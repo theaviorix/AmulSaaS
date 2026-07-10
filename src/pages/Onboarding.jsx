@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
-import { useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { Store, ShoppingCart, ArrowLeft, ArrowRight, Loader2 } from 'lucide-react';
-import { useSession, generateUserId } from '@/lib/AppSession';
-import { store, genInviteCode, isPhoneTaken } from '@/lib/store';
-import { accounts } from '@/lib/accounts';
-import { notify } from '@/lib/notify';
-import { requestOTP, verifyOTP } from '@/lib/otp';
+import { useSession } from '@/lib/AppSession';
+import { supabase } from '@/lib/supabaseClient';
+import { setMyRole } from '@/lib/supabaseAuth';
 import Logo from '@/components/Logo';
+
+const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const randomLetter = () => ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
 
 function Field({ label, value, onChange, placeholder, type = 'text', required }) {
   return (
@@ -23,188 +24,148 @@ function Field({ label, value, onChange, placeholder, type = 'text', required })
   );
 }
 
-// Inline phone OTP verification, shown in place of the details form once a
-// code has been "sent" (simulated locally — there's no SMS provider here).
-function PhoneOtpStep({ phone, demoCode, onVerified, onBack }) {
-  const [code, setCode] = useState('');
-  const [error, setError] = useState('');
-  const [verifying, setVerifying] = useState(false);
-  const [resendMsg, setResendMsg] = useState('');
-
-  const verify = () => {
-    setError('');
-    setVerifying(true);
-    try {
-      verifyOTP(`phone:${phone}`, code);
-      onVerified();
-    } catch (err) {
-      setError(err.message || 'Verification failed');
-    } finally {
-      setVerifying(false);
-    }
-  };
-
-  const resend = () => {
-    setError('');
-    try {
-      requestOTP(`phone:${phone}`);
-      setResendMsg('A new code was generated.');
-      setTimeout(() => setResendMsg(''), 3000);
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  return (
-    <Card title="Verify your phone number" step="One more step">
-      <div className="space-y-4">
-        <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">
-          <strong>Demo mode:</strong> no SMS provider is connected yet, so here's your code for {phone}: <span className="font-mono font-semibold">{demoCode}</span>
-        </div>
-        {resendMsg && <p className="text-sm text-emerald-700">{resendMsg}</p>}
-        <Field label="6-digit code" value={code} onChange={(v) => setCode(v.replace(/\D/g, '').slice(0, 6))} placeholder="123456" required />
-        {error && <p className="text-sm text-alert">{error}</p>}
-        <div className="flex gap-2">
-          <button onClick={onBack} className="px-4 py-3.5 rounded-xl border border-mist text-ink font-medium hover:bg-canvas transition-colors">Back</button>
-          <button
-            onClick={verify}
-            disabled={verifying || code.length !== 6}
-            className="flex-1 bg-jet text-surface font-medium py-3.5 rounded-xl hover:bg-ink transition-colors inline-flex items-center justify-center gap-2 disabled:opacity-50"
-          >
-            {verifying ? <Loader2 size={16} className="animate-spin" /> : null}
-            Verify & continue
-          </button>
-        </div>
-        <button onClick={resend} className="w-full text-center text-sm text-ink2 hover:text-ink hover:underline">Resend code</button>
-      </div>
-    </Card>
-  );
+// Generates a candidate invite code from the business name and confirms
+// it's actually free in the database (retrying on the rare collision —
+// the column also has a UNIQUE constraint as a hard backstop).
+async function generateFreeInviteCode(businessName) {
+  const lettersFromName = (businessName || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
+  for (let attempt = 0; attempt < 10; attempt++) {
+    let base = lettersFromName;
+    while (base.length < 4) base += randomLetter();
+    const suffix = Math.floor(100 + Math.random() * 900);
+    const code = `${base}-${suffix}`;
+    const { data } = await supabase.from('supplier_profiles').select('id').eq('invite_code', code).maybeSingle();
+    if (!data) return code;
+  }
+  return `SHOP-${Date.now().toString(36).toUpperCase()}`;
 }
 
 export default function Onboarding() {
-  const [params] = useSearchParams();
-  const roleParam = params.get('role');
-  const accountId = params.get('accountId');
-  const account = accountId ? accounts.get(accountId) : null;
   const navigate = useNavigate();
-  const { setSession } = useSession();
-  const [role, setRole] = useState(roleParam === 'supplier' || roleParam === 'customer' ? roleParam : null);
+  const { session, refreshSession } = useSession();
+  const [role, setRole] = useState(null);
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({ business_name: '', shop_name: '', owner_name: '', phone: '', address: '', gstin: '', invite_code: '' });
   const [error, setError] = useState('');
-  const [verifyingPhone, setVerifyingPhone] = useState(false);
-  const [phoneDemoCode, setPhoneDemoCode] = useState('');
-  const [verifiedPhone, setVerifiedPhone] = useState(''); // last phone number that passed OTP
+  const [saving, setSaving] = useState(false);
   const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
-  const pendingRef = React.useRef(() => {});
 
-  const startSupplier = () => { setRole('supplier'); };
-  const startCustomer = () => { setRole('customer'); setStep(1); };
-
-  // Shared gate before either role's details can proceed: block duplicate
-  // phone numbers, and require a fresh OTP check for any new phone number.
-  const requirePhoneVerification = (onPassed) => {
-    const phone = form.phone.trim();
-    if (!phone) { onPassed(); return; } // phone is optional — nothing to verify
-    if (isPhoneTaken(phone)) {
-      setError('This phone number is already registered to another account.');
-      return;
-    }
-    if (verifiedPhone === phone) { onPassed(); return; } // already verified this exact number
-    setError('');
-    pendingRef.current = onPassed;
-    const code = requestOTP(`phone:${phone}`);
-    setPhoneDemoCode(code);
-    setVerifyingPhone(true);
-  };
-
-  const submitSupplier = () => {
-    if (!form.business_name.trim()) { setError('Business name is required'); return; }
-    requirePhoneVerification(finalizeSupplier);
-  };
-
-  const finalizeSupplier = () => {
-    setVerifiedPhone(form.phone.trim());
-    setVerifyingPhone(false);
-    const userId = generateUserId();
-    const code = genInviteCode(form.business_name);
-    const profile = store.create('supplier_profiles', {
-      user_id: userId,
-      business_name: form.business_name.trim(),
-      owner_name: form.owner_name.trim(),
-      phone: form.phone.trim(),
-      address: form.address.trim(),
-      gstin: form.gstin.trim(),
-      invite_code: code,
-    });
-    const samples = [
-      { name: 'Amul Gold Milk', unit: '1 L', price: 64 },
-      { name: 'Amul Gold Milk', unit: '500 ml', price: 27 },
-      { name: 'Amul Taaza', unit: '500 ml', price: 25 },
-      { name: 'Amul Butter', unit: '100 g', price: 56 },
-      { name: 'Amul Cheese', unit: '200 g', price: 130 },
-      { name: 'Amul Ghee', unit: '500 ml', price: 240 },
-      { name: 'Amul Curd', unit: '500 g', price: 35 },
-    ];
-    samples.forEach((p) => store.create('products', { supplier_user_id: userId, ...p, active: true, in_stock: true }));
-    if (account) accounts.linkProfile(account.id, { role: 'supplier', userId, profileId: profile.id });
-    setSession({ accountId: account?.id, email: account?.email, role: 'supplier', userId, profileId: profile.id });
-    navigate('/supplier');
-  };
-
-  const submitCustomerProfile = () => {
-    if (!form.shop_name?.trim()) { setError('Shop name is required'); return; }
-    const goToStep2 = () => { setVerifiedPhone(form.phone.trim()); setVerifyingPhone(false); setStep(2); setError(''); };
-    requirePhoneVerification(goToStep2);
-  };
-
-  const linkSupplier = () => {
-    const code = (form.invite_code || '').trim().toUpperCase();
-    if (!code) { setError('Enter your supplier\'s invite code'); return; }
-    const sup = store.find('supplier_profiles', (s) => s.invite_code.toUpperCase() === code);
-    if (!sup) { setError('Invalid invite code. Check with your supplier.'); return; }
-    const shopName = (form.shop_name || '').trim() || 'Shop';
-    const userId = generateUserId();
-    const cprof = store.create('customer_profiles', {
-      user_id: userId,
-      shop_name: shopName,
-      owner_name: form.owner_name.trim(),
-      phone: form.phone.trim(),
-      address: form.address.trim(),
-    });
-    const link = store.create('supplier_links', {
-      customer_user_id: userId,
-      customer_profile_id: cprof.id,
-      customer_name: shopName,
-      supplier_user_id: sup.user_id,
-      supplier_profile_id: sup.id,
-      status: 'active',
-      invite_code: code,
-    });
-    notify(sup.user_id, 'link_request', `${shopName} joined your network.`, '/supplier/customers');
-    if (account) accounts.linkProfile(account.id, { role: 'customer', userId, profileId: cprof.id });
-    setSession({ accountId: account?.id, email: account?.email, role: 'customer', userId, profileId: cprof.id, linkId: link.id, supplierUserId: sup.user_id, supplierProfileId: sup.id });
-    navigate('/customer/new-order');
-  };
-
-  if (verifyingPhone) {
+  if (!session) {
     return (
-      <div className="min-h-screen bg-canvas">
-        <div className="px-5 h-16 flex items-center justify-between max-w-6xl mx-auto">
-          <Logo />
-          <Link to="/" className="text-sm text-ink2 hover:text-ink inline-flex items-center gap-1.5"><ArrowLeft size={15} /> Back to site</Link>
-        </div>
-        <div className="max-w-md mx-auto px-5 py-8">
-          <PhoneOtpStep
-            phone={form.phone.trim()}
-            demoCode={phoneDemoCode}
-            onBack={() => setVerifyingPhone(false)}
-            onVerified={() => pendingRef.current?.()}
-          />
+      <div className="min-h-screen bg-canvas grid place-items-center px-5">
+        <div className="text-center max-w-sm">
+          <p className="text-ink2">You need to be logged in to finish setting up your account.</p>
+          <Link to="/login" className="mt-4 inline-block text-sm font-medium text-ink underline">Go to login</Link>
         </div>
       </div>
     );
   }
+
+  const startSupplier = () => setRole('supplier');
+  const startCustomer = () => { setRole('customer'); setStep(1); };
+
+  const submitSupplier = async () => {
+    if (!form.business_name.trim()) { setError('Business name is required'); return; }
+    setError('');
+    setSaving(true);
+    try {
+      const inviteCode = await generateFreeInviteCode(form.business_name);
+      const { data: profile, error: insertError } = await supabase
+        .from('supplier_profiles')
+        .insert({
+          user_id: session.userId,
+          business_name: form.business_name.trim(),
+          owner_name: form.owner_name.trim(),
+          phone: form.phone.trim(),
+          address: form.address.trim(),
+          gstin: form.gstin.trim(),
+          invite_code: inviteCode,
+        })
+        .select()
+        .single();
+      if (insertError) throw insertError;
+
+      const samples = [
+        { name: 'Amul Gold Milk', unit: '1 L', price: 64 },
+        { name: 'Amul Gold Milk', unit: '500 ml', price: 27 },
+        { name: 'Amul Taaza', unit: '500 ml', price: 25 },
+        { name: 'Amul Butter', unit: '100 g', price: 56 },
+        { name: 'Amul Cheese', unit: '200 g', price: 130 },
+        { name: 'Amul Ghee', unit: '500 ml', price: 240 },
+        { name: 'Amul Curd', unit: '500 g', price: 35 },
+      ];
+      await supabase.from('products').insert(samples.map((p) => ({ supplier_user_id: session.userId, ...p, active: true })));
+
+      await setMyRole(session.userId, 'supplier');
+      await refreshSession();
+      navigate('/supplier');
+    } catch (err) {
+      setError(err.message || 'Something went wrong setting up your business. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const submitCustomerProfile = () => {
+    if (!form.shop_name?.trim()) { setError('Shop name is required'); return; }
+    setError('');
+    setStep(2);
+  };
+
+  const linkSupplier = async () => {
+    const code = (form.invite_code || '').trim().toUpperCase();
+    if (!code) { setError("Enter your supplier's invite code"); return; }
+    setError('');
+    setSaving(true);
+    try {
+      const { data: sup, error: findError } = await supabase
+        .from('supplier_profiles')
+        .select('id, user_id')
+        .eq('invite_code', code)
+        .maybeSingle();
+      if (findError) throw findError;
+      if (!sup) { setError('Invalid invite code. Check with your supplier.'); setSaving(false); return; }
+
+      const shopName = (form.shop_name || '').trim() || 'Shop';
+      const { data: cprof, error: profileError } = await supabase
+        .from('customer_profiles')
+        .insert({
+          user_id: session.userId,
+          shop_name: shopName,
+          owner_name: form.owner_name.trim(),
+          phone: form.phone.trim(),
+          address: form.address.trim(),
+        })
+        .select()
+        .single();
+      if (profileError) throw profileError;
+
+      const { error: linkError } = await supabase.from('supplier_links').insert({
+        customer_user_id: session.userId,
+        customer_profile_id: cprof.id,
+        customer_name: shopName,
+        supplier_user_id: sup.user_id,
+        supplier_profile_id: sup.id,
+        status: 'active',
+      });
+      if (linkError) throw linkError;
+
+      await supabase.from('notifications').insert({
+        user_id: sup.user_id,
+        type: 'link_request',
+        text: `${shopName} joined your network.`,
+        link: '/supplier/customers',
+      });
+
+      await setMyRole(session.userId, 'customer');
+      await refreshSession();
+      navigate('/customer/new-order');
+    } catch (err) {
+      setError(err.message || 'Something went wrong linking to your supplier. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-canvas">
@@ -228,8 +189,8 @@ export default function Onboarding() {
               </div>
               <Field label="Address" value={form.address} onChange={set('address')} placeholder="Godown / warehouse address" />
               {error && <p className="text-sm text-alert">{error}</p>}
-              <button onClick={submitSupplier} className="w-full bg-jet text-surface font-medium py-3.5 rounded-xl hover:bg-ink transition-colors inline-flex items-center justify-center gap-2">
-                Continue <ArrowRight size={16} />
+              <button onClick={submitSupplier} disabled={saving} className="w-full bg-jet text-surface font-medium py-3.5 rounded-xl hover:bg-ink transition-colors inline-flex items-center justify-center gap-2 disabled:opacity-60">
+                {saving ? <Loader2 size={16} className="animate-spin" /> : null} Continue {!saving && <ArrowRight size={16} />}
               </button>
             </div>
           </Card>
@@ -254,8 +215,8 @@ export default function Onboarding() {
               {error && <p className="text-sm text-alert">{error}</p>}
               <div className="flex gap-2">
                 <button onClick={() => setStep(1)} className="px-4 py-3.5 rounded-xl border border-mist text-ink font-medium hover:bg-canvas transition-colors">Back</button>
-                <button onClick={linkSupplier} className="flex-1 bg-jet text-surface font-medium py-3.5 rounded-xl hover:bg-ink transition-colors inline-flex items-center justify-center gap-2">
-                  Connect & start <ArrowRight size={16} />
+                <button onClick={linkSupplier} disabled={saving} className="flex-1 bg-jet text-surface font-medium py-3.5 rounded-xl hover:bg-ink transition-colors inline-flex items-center justify-center gap-2 disabled:opacity-60">
+                  {saving ? <Loader2 size={16} className="animate-spin" /> : null} {!saving && <>Connect & start <ArrowRight size={16} /></>}
                 </button>
               </div>
             </div>

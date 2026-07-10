@@ -1,16 +1,12 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { accounts } from "@/lib/accounts";
+import { requestPasswordReset, verifyRecoveryOtp, updatePassword } from "@/lib/supabaseAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Mail, Lock, ArrowLeft, Loader2 } from "lucide-react";
 import AuthLayout from "@/components/AuthLayout";
 
-// Since this app currently has no email server (local storage only),
-// the "reset code" is generated locally and shown directly on screen
-// instead of being emailed. Swap for a real emailed link/token once
-// this moves to a backend.
 export default function ForgotPassword() {
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
@@ -20,21 +16,23 @@ export default function ForgotPassword() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [displayedCode, setDisplayedCode] = useState("");
 
-  const handleRequest = (e) => {
+  const handleRequest = async (e) => {
     e.preventDefault();
     setError("");
     setLoading(true);
-    const result = accounts.requestPasswordReset(email);
-    setLoading(false);
-    // Always proceed to step 2 regardless of whether the account exists,
-    // so we don't reveal which emails are registered.
-    if (result) setDisplayedCode(result.resetCode);
-    setStep(2);
+    try {
+      await requestPasswordReset(email);
+    } catch {
+      // Deliberately ignore errors here too, so we never reveal whether an
+      // email is registered — just move on to the code-entry step either way.
+    } finally {
+      setLoading(false);
+      setStep(2);
+    }
   };
 
-  const handleReset = (e) => {
+  const handleReset = async (e) => {
     e.preventDefault();
     setError("");
     if (newPassword !== confirmPassword) {
@@ -43,7 +41,8 @@ export default function ForgotPassword() {
     }
     setLoading(true);
     try {
-      accounts.resetPassword(email, code, newPassword);
+      await verifyRecoveryOtp(email, code);
+      await updatePassword(newPassword);
       navigate("/login");
     } catch (err) {
       setError(err.message || "Failed to reset password");
@@ -86,10 +85,10 @@ export default function ForgotPassword() {
             {loading ? (
               <>
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Checking...
+                Sending...
               </>
             ) : (
-              "Get reset code"
+              "Send reset code"
             )}
           </Button>
         </form>
@@ -101,25 +100,16 @@ export default function ForgotPassword() {
     <AuthLayout
       icon={Lock}
       title="Enter new password"
-      subtitle={`Reset code for ${email}`}
+      subtitle={`Reset code sent to ${email}`}
       footer={
         <Link to="/login" className="text-primary font-medium hover:underline">
           <ArrowLeft className="w-3 h-3 inline mr-1" />Back to log in
         </Link>
       }
     >
-      {displayedCode && (
-        <div className="mb-4 p-3 rounded-lg bg-primary/10 text-sm text-foreground">
-          No email server is set up yet, so here's your reset code directly:{" "}
-          <span className="font-mono font-semibold">{displayedCode}</span>
-          <p className="mt-1 text-xs text-muted-foreground">This code expires in 15 minutes.</p>
-        </div>
-      )}
-      {!displayedCode && (
-        <p className="mb-4 text-sm text-muted-foreground">
-          If an account exists with that email, use the code you were given to continue.
-        </p>
-      )}
+      <p className="mb-4 text-sm text-muted-foreground">
+        If an account exists with that email, we've sent a 6-digit code. Enter it below along with your new password.
+      </p>
       {error && (
         <div className="mb-4 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
           {error}
@@ -131,10 +121,12 @@ export default function ForgotPassword() {
           <Input
             id="code"
             autoFocus
-            placeholder="ABC123"
+            inputMode="numeric"
+            placeholder="123456"
             value={code}
-            onChange={(e) => setCode(e.target.value)}
-            className="h-12 uppercase"
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+            className="h-12 text-center tracking-[0.3em] font-mono"
+            maxLength={6}
             required
           />
         </div>

@@ -1,11 +1,10 @@
 import React, { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { accounts } from "@/lib/accounts";
-import { requestOTP } from "@/lib/otp";
+import { signUp } from "@/lib/supabaseAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { UserPlus, Mail, Lock, Loader2 } from "lucide-react";
+import { UserPlus, Mail, Lock, Loader2, Eye, EyeOff } from "lucide-react";
 import AuthLayout from "@/components/AuthLayout";
 
 export default function Register() {
@@ -15,31 +14,22 @@ export default function Register() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
-    // Read straight from the form as a fallback: some mobile browsers /
-    // password managers fill inputs at the DOM level without firing
-    // React's onChange, which previously left the email/password state
-    // empty even though the fields looked filled in.
-    const data = new FormData(e.target);
-    const finalEmail = (data.get("email") || email || "").toString();
-    const finalPassword = (data.get("password") || password || "").toString();
-    const finalConfirm = (data.get("confirm") || confirmPassword || "").toString();
-
-    if (finalPassword !== finalConfirm) {
+    if (password !== confirmPassword) {
       setError("Passwords do not match");
       return;
     }
     setLoading(true);
     try {
-      const account = accounts.register(finalEmail, finalPassword);
-      const code = requestOTP(`email:${account.email}`);
+      await signUp(email, password);
       const roleQuery = roleParam ? `&role=${roleParam}` : "";
-      navigate(`/verify-email?accountId=${account.id}${roleQuery}&demoCode=${code}`);
+      navigate(`/verify-email?email=${encodeURIComponent(email.trim().toLowerCase())}${roleQuery}`);
     } catch (err) {
       setError(err.message || "Registration failed");
       setLoading(false);
@@ -73,7 +63,6 @@ export default function Register() {
             <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" aria-hidden="true" />
             <Input
               id="email"
-              name="email"
               type="email"
               autoComplete="email"
               autoFocus
@@ -91,16 +80,18 @@ export default function Register() {
             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" aria-hidden="true" />
             <Input
               id="password"
-              name="password"
-              type="password"
+              type={showPassword ? "text" : "password"}
               autoComplete="new-password"
               placeholder="At least 6 characters"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="pl-10 h-12"
+              className="pl-10 pr-10 h-12"
               required
               minLength={6}
             />
+            <button type="button" onClick={() => setShowPassword((s) => !s)} tabIndex={-1} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label={showPassword ? "Hide password" : "Show password"}>
+              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
           </div>
         </div>
         <div className="space-y-2">
@@ -109,13 +100,12 @@ export default function Register() {
             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" aria-hidden="true" />
             <Input
               id="confirm"
-              name="confirm"
-              type="password"
+              type={showPassword ? "text" : "password"}
               autoComplete="new-password"
               placeholder="••••••••"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              className="pl-10 h-12"
+              className="pl-10 pr-10 h-12"
               required
               minLength={6}
             />
@@ -128,7 +118,7 @@ export default function Register() {
               Creating account...
             </>
           ) : (
-            "Create account"
+            "Continue"
           )}
         </Button>
       </form>

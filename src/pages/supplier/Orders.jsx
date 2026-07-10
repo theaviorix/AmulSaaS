@@ -19,8 +19,11 @@ export default function SupplierOrders() {
   const [sort, setSort] = useState('newest');
   const [modal, setModal] = useState(null);
   const [qty, setQty] = useState({});
+  const [extraItems, setExtraItems] = useState([]); // products added during accept/edit that weren't in the original order
+  const [addProductId, setAddProductId] = useState('');
   const [reason, setReason] = useState('');
   const [dispatchListOpen, setDispatchListOpen] = useState(false);
+  const products = store.filter('products', (p) => p.supplier_user_id === uid);
 
   const all = store.filter('orders', (o) => o.supplier_user_id === uid)
     .sort((a, b) => sort === 'oldest' ? new Date(a.created_date) - new Date(b.created_date) : new Date(b.created_date) - new Date(a.created_date));
@@ -34,6 +37,8 @@ export default function SupplierOrders() {
     const q = {};
     order.items.forEach((it) => { q[it.product_id || it.name] = it.quantity; });
     setQty(q);
+    setExtraItems([]);
+    setAddProductId('');
     setModal({ type, order });
   };
   const openReject = (order) => { setReason(''); setModal({ type: 'reject', order }); };
@@ -41,10 +46,12 @@ export default function SupplierOrders() {
 
   const confirmAccept = () => {
     const order = modal.order;
-    const items = order.items.map((it) => ({ ...it, quantity: roundToStep(qty[it.product_id || it.name] ?? 0) }));
+    const existing = order.items.map((it) => ({ ...it, quantity: roundToStep(qty[it.product_id || it.name] ?? 0) }));
+    const added = extraItems.filter((it) => it.quantity > 0);
+    const items = [...existing, ...added];
     const total = items.reduce((s, it) => s + it.price * it.quantity, 0);
     const isFirstAccept = order.status === 'placed';
-    const adjusted = isFirstAccept && items.some((it, i) => it.quantity !== order.items[i].quantity);
+    const adjusted = isFirstAccept && (added.length > 0 || existing.some((it, i) => it.quantity !== order.items[i].quantity));
     const isPostAcceptEdit = !isFirstAccept;
     const patch = {
       status: isFirstAccept ? 'accepted' : order.status,
@@ -169,7 +176,21 @@ export default function SupplierOrders() {
         {modal && (() => {
           const o = modal.order;
           const liveItems = o.items.map((it) => ({ ...it, quantity: roundToStep(qty[it.product_id || it.name] ?? 0) }));
-          const liveTotal = liveItems.reduce((s, it) => s + it.price * it.quantity, 0);
+          const addedTotal = extraItems.reduce((s, it) => s + it.price * (it.quantity || 0), 0);
+          const liveTotal = liveItems.reduce((s, it) => s + it.price * it.quantity, 0) + addedTotal;
+          const existingIds = new Set(o.items.map((it) => it.product_id).filter(Boolean));
+          const extraIds = new Set(extraItems.map((it) => it.product_id));
+          const availableToAdd = products.filter((p) => !existingIds.has(p.id) && !extraIds.has(p.id));
+          const addProduct = () => {
+            const p = products.find((pr) => pr.id === addProductId);
+            if (!p) return;
+            setExtraItems((cur) => [...cur, { product_id: p.id, name: p.name, unit: p.unit, price: p.price, quantity: 1 }]);
+            setAddProductId('');
+          };
+          const setExtraQty = (id, val) => {
+            setExtraItems((cur) => cur.map((it) => it.product_id === id ? { ...it, quantity: roundToStep(val) } : it));
+          };
+          const removeExtra = (id) => setExtraItems((cur) => cur.filter((it) => it.product_id !== id));
           return (
             <div className="space-y-3">
               <p className="text-sm text-ink2">{o.customer_name} · {o.slot} round</p>
@@ -190,6 +211,22 @@ export default function SupplierOrders() {
                   </div>
                 );
               })}
+              {extraItems.map((it) => (
+                <div key={it.product_id} className="flex items-center gap-2 bg-ok/5 -mx-1 px-1 rounded-lg">
+                  <span className="flex-1 text-sm text-ink">{it.name} <span className="text-ink2">· {it.unit} · {inr(it.price)}</span> <span className="text-[10px] text-ok font-medium">added</span></span>
+                  <input type="number" min="0" step="0.5" value={it.quantity} onChange={(e) => setExtraQty(it.product_id, e.target.value)} className="w-20 border border-mist rounded-lg px-2 py-2 text-ink font-mono text-sm outline-none focus:border-ink" />
+                  <button onClick={() => removeExtra(it.product_id)} className="text-ink2 hover:text-alert p-1"><X size={14} /></button>
+                </div>
+              ))}
+              {availableToAdd.length > 0 && (
+                <div className="flex items-center gap-2 pt-1 border-t border-mist/60">
+                  <select value={addProductId} onChange={(e) => setAddProductId(e.target.value)} className="flex-1 border border-mist rounded-lg px-2.5 py-2 text-sm text-ink bg-surface outline-none focus:border-ink">
+                    <option value="">+ Add a product to this order...</option>
+                    {availableToAdd.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.unit} · {inr(p.price)}</option>)}
+                  </select>
+                  <button onClick={addProduct} disabled={!addProductId} className="text-xs font-medium px-3 py-2 rounded-lg bg-jet text-surface disabled:opacity-40 disabled:cursor-not-allowed">Add</button>
+                </div>
+              )}
               <div className="flex justify-between text-sm pt-2 border-t border-mist/60"><span className="text-ink2">New total</span><span className="font-mono font-semibold text-ink">{inr(liveTotal)}</span></div>
             </div>
           );
