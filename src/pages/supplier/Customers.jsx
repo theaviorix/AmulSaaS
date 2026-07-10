@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Users, Copy, Check, Share2, Bell, PackageX, IndianRupee, Send, BellRing, ScrollText } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { useSession } from '@/lib/AppSession';
+import { supabase } from '@/lib/supabaseClient';
 import { inr } from '@/lib/store';
 import { notify } from '@/lib/notify';
 import PageHeader from '@/components/PageHeader';
@@ -22,7 +23,25 @@ export default function SupplierCustomers() {
   const store = useStore();
   const { session } = useSession();
   const uid = session.userId;
-  const profile = store.find('supplier_profiles', (s) => s.id === session.profileId);
+
+  // The supplier's own profile (business name + invite code) now lives in
+  // Supabase, not the local store — Onboarding writes it there. Fetch it
+  // directly so the invite code banner is never stuck showing "undefined".
+  const [profile, setProfile] = useState(null);
+  useEffect(() => {
+    let active = true;
+    if (!session.profileId) return;
+    supabase
+      .from('supplier_profiles')
+      .select('*')
+      .eq('id', session.profileId)
+      .single()
+      .then(({ data, error }) => {
+        if (active && !error) setProfile(data);
+      });
+    return () => { active = false; };
+  }, [session.profileId]);
+
   const links = store.filter('supplier_links', (l) => l.supplier_user_id === uid);
   const pending = links.filter((l) => l.status === 'pending');
   const activeAll = links.filter((l) => l.status === 'active');
