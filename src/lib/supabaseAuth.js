@@ -1,24 +1,43 @@
 import { supabase } from './supabaseClient';
 
+// Supabase (and plain network failures) don't always throw a normal Error
+// with a `.message` string — sometimes it's an object whose real text sits
+// under `error_description`, `error`, or `msg`, and sometimes `.message`
+// exists but isn't enumerable, so naive JSON.stringify(err) renders as "{}".
+// This pulls a readable string out of whatever shape comes back.
+export function getErrorMessage(err, fallback = 'Something went wrong. Please try again.') {
+  if (!err) return fallback;
+  if (typeof err === 'string') return err;
+  if (err.message && typeof err.message === 'string') return err.message;
+  if (err.error_description) return err.error_description;
+  if (err.error && typeof err.error === 'string') return err.error;
+  if (err.msg) return err.msg;
+  // Genuine network failure (e.g. Supabase unreachable, misconfigured URL/key)
+  if (err.name === 'TypeError' || /fetch/i.test(String(err))) {
+    return 'Could not reach the server. Check your connection and try again.';
+  }
+  return fallback;
+}
+
+
 // --- Auth actions -----------------------------------------------------
 
-export async function signUp(email, password) {
-  const { data, error } = await supabase.auth.signUp({ email, password });
+export async function signUp(email, password, redirectPath = '/onboarding') {
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { emailRedirectTo: `${window.location.origin}${redirectPath}` },
+  });
   if (error) throw error;
-  return data; // data.user exists but is unconfirmed until OTP/link is verified
+  return data; // data.user exists but is unconfirmed until they click the emailed link
 }
 
-// Confirms the 6-digit code Supabase emailed after signUp().
-// Requires the "Confirm signup" email template to include {{ .Token }}
-// (see setup notes) — otherwise Supabase only sends a clickable link.
-export async function verifySignupOtp(email, token) {
-  const { data, error } = await supabase.auth.verifyOtp({ email, token, type: 'signup' });
-  if (error) throw error;
-  return data;
-}
-
-export async function resendSignupOtp(email) {
-  const { error } = await supabase.auth.resend({ type: 'signup', email });
+export async function resendSignupEmail(email, redirectPath = '/onboarding') {
+  const { error } = await supabase.auth.resend({
+    type: 'signup',
+    email,
+    options: { emailRedirectTo: `${window.location.origin}${redirectPath}` },
+  });
   if (error) throw error;
 }
 
@@ -33,18 +52,10 @@ export async function signOut() {
 }
 
 export async function requestPasswordReset(email) {
-  const { error } = await supabase.auth.resetPasswordForEmail(email);
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${window.location.origin}/reset-password`,
+  });
   if (error) throw error;
-}
-
-// Confirms the 6-digit code from the "Reset password" email and logs the
-// user into a temporary recovery session, so updatePassword() can be
-// called right after. Requires the "Reset Password" email template to
-// include {{ .Token }} (same setup as the signup template).
-export async function verifyRecoveryOtp(email, token) {
-  const { data, error } = await supabase.auth.verifyOtp({ email, token, type: 'recovery' });
-  if (error) throw error;
-  return data;
 }
 
 export async function updatePassword(newPassword) {

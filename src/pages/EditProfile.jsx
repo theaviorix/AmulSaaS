@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { useSession } from '@/lib/AppSession';
 import { supabase } from '@/lib/supabaseClient';
-import { signIn, updatePassword } from '@/lib/supabaseAuth';
+import { signIn, updatePassword, getErrorMessage } from '@/lib/supabaseAuth';
 import { toast } from '@/components/ui/use-toast';
 import { compressImageFile } from '@/lib/exportUtils';
 import Avatar from '@/components/Avatar';
@@ -87,7 +87,7 @@ export default function EditProfile() {
       setProfile((p) => ({ ...p, avatar: dataUrl }));
       toast({ title: 'Profile photo updated' });
     } catch (err) {
-      toast({ title: 'Could not use this photo', description: err.message || 'Try a different image.' });
+      toast({ title: 'Could not use this photo', description: getErrorMessage(err, 'Try a different image.') });
     } finally {
       setAvatarUploading(false);
     }
@@ -134,8 +134,8 @@ export default function EditProfile() {
       setPw({ current: '', next: '', confirm: '' });
       toast({ title: 'Password changed', description: 'Use your new password next time you log in.' });
     } catch (err) {
-      const msg = (err.message || '').toLowerCase();
-      setPwError(msg.includes('credentials') || msg.includes('invalid') ? 'Current password is incorrect' : (err.message || 'Failed to change password'));
+      const msg = getErrorMessage(err, '').toLowerCase();
+      setPwError(msg.includes('credentials') || msg.includes('invalid') ? 'Current password is incorrect' : getErrorMessage(err, 'Failed to change password'));
     } finally {
       setSavingPw(false);
     }

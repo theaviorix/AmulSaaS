@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { Store, ShoppingCart, ArrowLeft, ArrowRight, Loader2 } from 'lucide-react';
 import { useSession } from '@/lib/AppSession';
 import { supabase } from '@/lib/supabaseClient';
-import { setMyRole } from '@/lib/supabaseAuth';
+import { setMyRole, getErrorMessage } from '@/lib/supabaseAuth';
 import Logo from '@/components/Logo';
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -100,7 +100,7 @@ export default function Onboarding() {
       await refreshSession();
       navigate('/supplier');
     } catch (err) {
-      setError(err.message || 'Something went wrong setting up your business. Please try again.');
+      setError(getErrorMessage(err, 'Something went wrong setting up your business. Please try again.'));
     } finally {
       setSaving(false);
     }
@@ -161,7 +161,7 @@ export default function Onboarding() {
       await refreshSession();
       navigate('/customer/new-order');
     } catch (err) {
-      setError(err.message || 'Something went wrong linking to your supplier. Please try again.');
+      setError(getErrorMessage(err, 'Something went wrong linking to your supplier. Please try again.'));
     } finally {
       setSaving(false);
     }

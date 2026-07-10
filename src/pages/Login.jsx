@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { signIn } from "@/lib/supabaseAuth";
+import { signIn, getErrorMessage } from "@/lib/supabaseAuth";
 import { useSession } from "@/lib/AppSession";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,7 +35,7 @@ export default function Login() {
         navigate(`/verify-email?email=${encodeURIComponent(email.trim().toLowerCase())}`);
         return;
       }
-      setError(err.message || "Invalid email or password");
+      setError(getErrorMessage(err, "Invalid email or password"));
       setLoading(false);
     }
   };

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { signUp } from "@/lib/supabaseAuth";
+import { signUp, getErrorMessage } from "@/lib/supabaseAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,11 +27,11 @@ export default function Register() {
     }
     setLoading(true);
     try {
-      await signUp(email, password);
-      const roleQuery = roleParam ? `&role=${roleParam}` : "";
-      navigate(`/verify-email?email=${encodeURIComponent(email.trim().toLowerCase())}${roleQuery}`);
+      const redirectPath = roleParam ? `/onboarding?role=${roleParam}` : "/onboarding";
+      await signUp(email, password, redirectPath);
+      navigate(`/verify-email?email=${encodeURIComponent(email.trim().toLowerCase())}`);
     } catch (err) {
-      setError(err.message || "Registration failed");
+      setError(getErrorMessage(err, "Registration failed"));
       setLoading(false);
     }
   };

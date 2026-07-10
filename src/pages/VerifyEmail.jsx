@@ -1,21 +1,15 @@
 import React, { useState } from "react";
-import { useNavigate, useSearchParams, Link } from "react-router-dom";
-import { verifySignupOtp, resendSignupOtp } from "@/lib/supabaseAuth";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { useSearchParams, Link } from "react-router-dom";
+import { resendSignupEmail, getErrorMessage } from "@/lib/supabaseAuth";
 import { MailCheck, Loader2 } from "lucide-react";
 import AuthLayout from "@/components/AuthLayout";
 
 export default function VerifyEmail() {
-  const navigate = useNavigate();
   const [params] = useSearchParams();
   const email = params.get("email") || "";
-  const roleParam = params.get("role");
 
-  const [code, setCode] = useState("");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
   const [resent, setResent] = useState(false);
 
   if (!email) {
@@ -28,37 +22,25 @@ export default function VerifyEmail() {
     );
   }
 
-  const handleVerify = async (e) => {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
-    try {
-      await verifySignupOtp(email, code);
-      const roleQuery = roleParam ? `?role=${roleParam}` : "";
-      navigate(`/onboarding${roleQuery}`);
-    } catch (err) {
-      setError(err.message || "Verification failed");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleResend = async () => {
     setError("");
+    setSending(true);
     try {
-      await resendSignupOtp(email);
+      await resendSignupEmail(email);
       setResent(true);
-      setTimeout(() => setResent(false), 3000);
+      setTimeout(() => setResent(false), 4000);
     } catch (err) {
-      setError(err.message);
+      setError(getErrorMessage(err));
+    } finally {
+      setSending(false);
     }
   };
 
   return (
     <AuthLayout
       icon={MailCheck}
-      title="Confirm your email"
-      subtitle={`Enter the 6-digit code we sent to ${email}`}
+      title="Check your email"
+      subtitle={`We sent a confirmation link to ${email}`}
       footer={
         <>
           Wrong email?{" "}
@@ -68,53 +50,31 @@ export default function VerifyEmail() {
         </>
       }
     >
-      {error && (
-        <div className="mb-4 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
-          {error}
-        </div>
-      )}
-      {resent && (
-        <div className="mb-4 p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm">
-          A new code was sent to your email.
-        </div>
-      )}
+      <div className="space-y-4 text-center">
+        <p className="text-sm text-muted-foreground">
+          Click the link in that email to confirm your account — it'll bring you right back here and take you to set up your business or shop.
+        </p>
 
-      <form onSubmit={handleVerify} className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="otp">Verification code</Label>
-          <Input
-            id="otp"
-            name="otp"
-            type="text"
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            autoFocus
-            maxLength={6}
-            placeholder="123456"
-            value={code}
-            onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-            className="h-12 text-center text-lg tracking-[0.3em] font-mono"
-            required
-          />
-        </div>
-        <Button type="submit" className="w-full h-12 font-medium" disabled={loading || code.length !== 6}>
-          {loading ? (
-            <>
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              Verifying...
-            </>
-          ) : (
-            "Verify email"
-          )}
-        </Button>
+        {error && (
+          <div className="p-3 rounded-lg bg-destructive/10 text-destructive text-sm text-left">
+            {error}
+          </div>
+        )}
+        {resent && (
+          <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm">
+            Email resent — check your inbox (and spam folder).
+          </div>
+        )}
+
         <button
-          type="button"
           onClick={handleResend}
-          className="w-full text-center text-sm text-primary hover:underline"
+          disabled={sending}
+          className="text-sm font-medium text-primary hover:underline inline-flex items-center gap-1.5 disabled:opacity-60"
         >
-          Resend code
+          {sending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+          Resend email
         </button>
-      </form>
+      </div>
     </AuthLayout>
   );
 }
