@@ -11,10 +11,17 @@ function initials(name) {
 export default function Avatar({ src, name, size = 'sm', className = '' }) {
   const sizing = SIZES[size] || SIZES.sm;
   if (src) {
-    return <img src={src} alt={name || 'Avatar'} className={`${sizing} rounded-full object-cover shrink-0 ${className}`} />;
+    return (
+      <img
+        src={src}
+        alt={name || 'Avatar'}
+        className={`${sizing} rounded-full object-cover object-center aspect-square shrink-0 grow-0 basis-auto ${className}`}
+        style={{ minWidth: 0 }}
+      />
+    );
   }
   return (
-    <span className={`${sizing} rounded-full bg-jet text-surface grid place-items-center font-display font-semibold shrink-0 ${className}`}>
+    <span className={`${sizing} rounded-full bg-jet text-surface grid place-items-center font-display font-semibold shrink-0 grow-0 basis-auto aspect-square ${className}`}>
       {initials(name)}
     </span>
   );

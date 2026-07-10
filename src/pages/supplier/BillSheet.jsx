@@ -3,7 +3,7 @@ import { Table2, Download, Sunrise, Sunset, CalendarDays } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { useSession } from '@/lib/AppSession';
 import { inr } from '@/lib/store';
-import { downloadCSV } from '@/lib/exportUtils';
+import { downloadPDF } from '@/lib/exportUtils';
 import PageHeader from '@/components/PageHeader';
 import EmptyState from '@/components/EmptyState';
 
@@ -115,7 +115,7 @@ export default function SupplierBillSheet() {
       rows.push([r.name, ...activeMatrix.productCols.map((c) => r.cells.get(c) || 0), r.total]);
     });
     rows.push(['Total qty', ...activeMatrix.colTotals, activeMatrix.grandTotal]);
-    downloadCSV(`bill-sheet_${date}_${tab}.csv`, rows);
+    downloadPDF(`bill-sheet_${date}_${tab}.pdf`, rows, { title: 'Amul Connect — Bill Sheet' });
   };
 
   return (
@@ -130,7 +130,7 @@ export default function SupplierBillSheet() {
               <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="rounded-xl border border-mist bg-surface pl-9 pr-3 py-2.5 text-sm text-ink outline-none focus:border-ink" />
             </div>
             <button onClick={exportCurrent} className="inline-flex items-center gap-1.5 text-sm font-medium bg-jet text-surface px-4 py-2.5 rounded-xl hover:bg-ink transition-colors">
-              <Download size={15} /> Export CSV
+              <Download size={15} /> Export PDF
             </button>
           </div>
         }

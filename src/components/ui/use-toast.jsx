@@ -2,7 +2,8 @@
 import { useState, useEffect } from "react";
 
 const TOAST_LIMIT = 20;
-const TOAST_REMOVE_DELAY = 1000000;
+const TOAST_REMOVE_DELAY = 300; // time for the exit animation to finish before unmount
+const TOAST_AUTO_DISMISS_DELAY = 3000; // auto-fade toasts after 3s
 
 const actionTypes = {
   ADD_TOAST: "ADD_TOAST",
@@ -133,6 +134,9 @@ function toast({ ...props }) {
       },
     },
   });
+
+  // Auto-fade this toast after a few seconds instead of leaving it on screen.
+  setTimeout(() => dismiss(), TOAST_AUTO_DISMISS_DELAY);
 
   return {
     id,

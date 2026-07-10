@@ -32,24 +32,44 @@ export const accounts = {
 
   register(email, password) {
     const normalized = normalizeEmail(email);
+    const pw = (password || '').trim();
     if (!normalized) throw new Error('Email is required');
-    if (!password || password.length < 6) throw new Error('Password must be at least 6 characters');
+    if (!pw || pw.length < 6) throw new Error('Password must be at least 6 characters');
     if (this.findByEmail(normalized)) throw new Error('An account with this email already exists');
     return store.create('accounts', {
       email: normalized,
-      passwordHash: simpleHash(password),
+      passwordHash: simpleHash(pw),
       role: null,
       userId: null,
       profileId: null,
+      // New accounts must confirm their email via OTP before logging in.
+      // (Accounts created before this existed have no explicit flag; those
+      // are treated as already verified — see `login()` below — so nobody
+      // who already had access gets locked out retroactively.)
+      emailVerified: false,
     });
   },
 
   login(email, password) {
     const account = this.findByEmail(email);
-    if (!account || account.passwordHash !== simpleHash(password)) {
+    // Trim the password the same way it's trimmed at registration time, so
+    // stray whitespace from autofill/keyboards doesn't cause a false
+    // "Invalid email or password" on an otherwise-correct password.
+    const pw = (password || '').trim();
+    if (!account || account.passwordHash !== simpleHash(pw)) {
       throw new Error('Invalid email or password');
     }
+    if (account.emailVerified === false) {
+      const err = new Error('Please confirm your email before logging in.');
+      err.code = 'EMAIL_NOT_VERIFIED';
+      err.accountId = account.id;
+      throw err;
+    }
     return account;
+  },
+
+  markEmailVerified(accountId) {
+    return store.update('accounts', accountId, { emailVerified: true });
   },
 
   // Called once onboarding finishes creating the supplier/customer profile,
@@ -59,8 +79,9 @@ export const accounts = {
   },
 
   updatePassword(accountId, newPassword) {
-    if (!newPassword || newPassword.length < 6) throw new Error('Password must be at least 6 characters');
-    return store.update('accounts', accountId, { passwordHash: simpleHash(newPassword) });
+    const pw = (newPassword || '').trim();
+    if (!pw || pw.length < 6) throw new Error('Password must be at least 6 characters');
+    return store.update('accounts', accountId, { passwordHash: simpleHash(pw) });
   },
 
   // Local-only "forgot password" — since there's no email server, we
@@ -85,9 +106,9 @@ export const accounts = {
       store.update('accounts', account.id, { resetCode: null, resetCodeCreatedAt: null });
       throw new Error('This reset code has expired. Request a new one.');
     }
-    if (!newPassword || newPassword.length < 6) throw new Error('Password must be at least 6 characters');
+    if (!newPassword || newPassword.trim().length < 6) throw new Error('Password must be at least 6 characters');
     store.update('accounts', account.id, {
-      passwordHash: simpleHash(newPassword),
+      passwordHash: simpleHash(newPassword.trim()),
       resetCode: null,
       resetCodeCreatedAt: null,
     });

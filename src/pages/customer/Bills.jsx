@@ -4,7 +4,7 @@ import { Wallet, Package, Star, Download } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { useSession } from '@/lib/AppSession';
 import { inr } from '@/lib/store';
-import { downloadCSV } from '@/lib/exportUtils';
+import { downloadPDF } from '@/lib/exportUtils';
 import PageHeader from '@/components/PageHeader';
 import EmptyState from '@/components/EmptyState';
 import StatusPill from '@/components/StatusPill';
@@ -43,7 +43,7 @@ export default function CustomerBills() {
     rows.push(['Orders']);
     rows.push(['Date', 'Round', 'Items', 'Total (₹)', 'Status']);
     allOrders.forEach((o) => rows.push([new Date(o.created_date).toLocaleDateString('en-IN'), o.slot, o.items.map((it) => `${it.name} x${it.quantity}`).join('; '), o.total, o.status]));
-    downloadCSV(`${(myProfile?.shop_name || 'my').replace(/\s+/g, '_')}_statement.csv`, rows);
+    downloadPDF(`${(myProfile?.shop_name || 'my').replace(/\s+/g, '_')}_statement.pdf`, rows, { title: 'Amul Connect — My statement' });
   };
 
   const [reviewing, setReviewing] = useState(null); // bill being reviewed

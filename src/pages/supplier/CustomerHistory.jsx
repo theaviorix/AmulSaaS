@@ -4,7 +4,7 @@ import { ArrowLeft, Download, Printer, ScrollText, Package } from 'lucide-react'
 import { useStore } from '@/lib/useStore';
 import { useSession } from '@/lib/AppSession';
 import { inr } from '@/lib/store';
-import { downloadCSV } from '@/lib/exportUtils';
+import { downloadPDF } from '@/lib/exportUtils';
 import Avatar from '@/components/Avatar';
 import EmptyState from '@/components/EmptyState';
 import StatusPill from '@/components/StatusPill';
@@ -83,7 +83,7 @@ export default function SupplierCustomerHistory() {
         (b.payments || []).map((p) => `${inr(p.amount)} on ${new Date(p.date).toLocaleDateString('en-IN')}`).join('; '),
       ]);
     });
-    downloadCSV(`${link.customer_name.replace(/\s+/g, '_')}_history.csv`, rows);
+    downloadPDF(`${link.customer_name.replace(/\s+/g, '_')}_history.pdf`, rows, { title: 'Amul Connect — Customer History' });
   };
 
   return (
@@ -91,7 +91,7 @@ export default function SupplierCustomerHistory() {
       <div className="flex items-center justify-between flex-wrap gap-3 print:hidden">
         <Link to="/supplier/customers" className="inline-flex items-center gap-1.5 text-sm text-ink2 hover:text-ink"><ArrowLeft size={15} /> Back to customers</Link>
         <div className="flex gap-2">
-          <button onClick={exportHistory} className="inline-flex items-center gap-1.5 text-sm font-medium border border-mist text-ink px-3.5 py-2.5 rounded-xl hover:bg-canvas transition-colors"><Download size={15} /> Export CSV</button>
+          <button onClick={exportHistory} className="inline-flex items-center gap-1.5 text-sm font-medium border border-mist text-ink px-3.5 py-2.5 rounded-xl hover:bg-canvas transition-colors"><Download size={15} /> Export PDF</button>
           <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 text-sm font-medium border border-mist text-ink px-3.5 py-2.5 rounded-xl hover:bg-canvas transition-colors"><Printer size={15} /> Print</button>
         </div>
       </div>

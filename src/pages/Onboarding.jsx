@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { Store, ShoppingCart, ArrowLeft, ArrowRight } from 'lucide-react';
+import { Store, ShoppingCart, ArrowLeft, ArrowRight, Loader2 } from 'lucide-react';
 import { useSession, generateUserId } from '@/lib/AppSession';
-import { store, genInviteCode } from '@/lib/store';
+import { store, genInviteCode, isPhoneTaken } from '@/lib/store';
 import { accounts } from '@/lib/accounts';
 import { notify } from '@/lib/notify';
+import { requestOTP, verifyOTP } from '@/lib/otp';
 import Logo from '@/components/Logo';
 
 function Field({ label, value, onChange, placeholder, type = 'text', required }) {
@@ -22,6 +23,64 @@ function Field({ label, value, onChange, placeholder, type = 'text', required })
   );
 }
 
+// Inline phone OTP verification, shown in place of the details form once a
+// code has been "sent" (simulated locally — there's no SMS provider here).
+function PhoneOtpStep({ phone, demoCode, onVerified, onBack }) {
+  const [code, setCode] = useState('');
+  const [error, setError] = useState('');
+  const [verifying, setVerifying] = useState(false);
+  const [resendMsg, setResendMsg] = useState('');
+
+  const verify = () => {
+    setError('');
+    setVerifying(true);
+    try {
+      verifyOTP(`phone:${phone}`, code);
+      onVerified();
+    } catch (err) {
+      setError(err.message || 'Verification failed');
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const resend = () => {
+    setError('');
+    try {
+      requestOTP(`phone:${phone}`);
+      setResendMsg('A new code was generated.');
+      setTimeout(() => setResendMsg(''), 3000);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <Card title="Verify your phone number" step="One more step">
+      <div className="space-y-4">
+        <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+          <strong>Demo mode:</strong> no SMS provider is connected yet, so here's your code for {phone}: <span className="font-mono font-semibold">{demoCode}</span>
+        </div>
+        {resendMsg && <p className="text-sm text-emerald-700">{resendMsg}</p>}
+        <Field label="6-digit code" value={code} onChange={(v) => setCode(v.replace(/\D/g, '').slice(0, 6))} placeholder="123456" required />
+        {error && <p className="text-sm text-alert">{error}</p>}
+        <div className="flex gap-2">
+          <button onClick={onBack} className="px-4 py-3.5 rounded-xl border border-mist text-ink font-medium hover:bg-canvas transition-colors">Back</button>
+          <button
+            onClick={verify}
+            disabled={verifying || code.length !== 6}
+            className="flex-1 bg-jet text-surface font-medium py-3.5 rounded-xl hover:bg-ink transition-colors inline-flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            {verifying ? <Loader2 size={16} className="animate-spin" /> : null}
+            Verify & continue
+          </button>
+        </div>
+        <button onClick={resend} className="w-full text-center text-sm text-ink2 hover:text-ink hover:underline">Resend code</button>
+      </div>
+    </Card>
+  );
+}
+
 export default function Onboarding() {
   const [params] = useSearchParams();
   const roleParam = params.get('role');
@@ -31,15 +90,42 @@ export default function Onboarding() {
   const { setSession } = useSession();
   const [role, setRole] = useState(roleParam === 'supplier' || roleParam === 'customer' ? roleParam : null);
   const [step, setStep] = useState(1);
-  const [form, setForm] = useState({ business_name: '', shop_name: '', owner_name: '', phone: '', address: '', gstin: '', upi_id: '', invite_code: '' });
+  const [form, setForm] = useState({ business_name: '', shop_name: '', owner_name: '', phone: '', address: '', gstin: '', invite_code: '' });
   const [error, setError] = useState('');
+  const [verifyingPhone, setVerifyingPhone] = useState(false);
+  const [phoneDemoCode, setPhoneDemoCode] = useState('');
+  const [verifiedPhone, setVerifiedPhone] = useState(''); // last phone number that passed OTP
   const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
+  const pendingRef = React.useRef(() => {});
 
   const startSupplier = () => { setRole('supplier'); };
   const startCustomer = () => { setRole('customer'); setStep(1); };
 
+  // Shared gate before either role's details can proceed: block duplicate
+  // phone numbers, and require a fresh OTP check for any new phone number.
+  const requirePhoneVerification = (onPassed) => {
+    const phone = form.phone.trim();
+    if (!phone) { onPassed(); return; } // phone is optional — nothing to verify
+    if (isPhoneTaken(phone)) {
+      setError('This phone number is already registered to another account.');
+      return;
+    }
+    if (verifiedPhone === phone) { onPassed(); return; } // already verified this exact number
+    setError('');
+    pendingRef.current = onPassed;
+    const code = requestOTP(`phone:${phone}`);
+    setPhoneDemoCode(code);
+    setVerifyingPhone(true);
+  };
+
   const submitSupplier = () => {
     if (!form.business_name.trim()) { setError('Business name is required'); return; }
+    requirePhoneVerification(finalizeSupplier);
+  };
+
+  const finalizeSupplier = () => {
+    setVerifiedPhone(form.phone.trim());
+    setVerifyingPhone(false);
     const userId = generateUserId();
     const code = genInviteCode(form.business_name);
     const profile = store.create('supplier_profiles', {
@@ -49,7 +135,6 @@ export default function Onboarding() {
       phone: form.phone.trim(),
       address: form.address.trim(),
       gstin: form.gstin.trim(),
-      upi_id: form.upi_id.trim(),
       invite_code: code,
     });
     const samples = [
@@ -69,8 +154,8 @@ export default function Onboarding() {
 
   const submitCustomerProfile = () => {
     if (!form.shop_name?.trim()) { setError('Shop name is required'); return; }
-    setStep(2);
-    setError('');
+    const goToStep2 = () => { setVerifiedPhone(form.phone.trim()); setVerifyingPhone(false); setStep(2); setError(''); };
+    requirePhoneVerification(goToStep2);
   };
 
   const linkSupplier = () => {
@@ -102,6 +187,25 @@ export default function Onboarding() {
     navigate('/customer/new-order');
   };
 
+  if (verifyingPhone) {
+    return (
+      <div className="min-h-screen bg-canvas">
+        <div className="px-5 h-16 flex items-center justify-between max-w-6xl mx-auto">
+          <Logo />
+          <Link to="/" className="text-sm text-ink2 hover:text-ink inline-flex items-center gap-1.5"><ArrowLeft size={15} /> Back to site</Link>
+        </div>
+        <div className="max-w-md mx-auto px-5 py-8">
+          <PhoneOtpStep
+            phone={form.phone.trim()}
+            demoCode={phoneDemoCode}
+            onBack={() => setVerifyingPhone(false)}
+            onVerified={() => pendingRef.current?.()}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-canvas">
       <div className="px-5 h-16 flex items-center justify-between max-w-6xl mx-auto">
@@ -123,7 +227,6 @@ export default function Onboarding() {
                 <Field label="GSTIN" value={form.gstin} onChange={set('gstin')} placeholder="Optional" />
               </div>
               <Field label="Address" value={form.address} onChange={set('address')} placeholder="Godown / warehouse address" />
-              <Field label="UPI ID" value={form.upi_id} onChange={set('upi_id')} placeholder="For payments (optional)" />
               {error && <p className="text-sm text-alert">{error}</p>}
               <button onClick={submitSupplier} className="w-full bg-jet text-surface font-medium py-3.5 rounded-xl hover:bg-ink transition-colors inline-flex items-center justify-center gap-2">
                 Continue <ArrowRight size={16} />

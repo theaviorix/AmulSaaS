@@ -83,6 +83,20 @@ export function inr(amount) {
   return '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: n % 1 === 0 ? 0 : 2 });
 }
 
+function normalizePhone(phone) {
+  return (phone || '').replace(/\D/g, '').slice(-10); // last 10 digits, ignore +91/spaces/dashes
+}
+
+// True if this phone number is already used by any supplier or customer
+// profile. Used to stop the same phone number being registered twice.
+export function isPhoneTaken(phone, excludeProfileId) {
+  const normalized = normalizePhone(phone);
+  if (normalized.length < 10) return false; // don't block obviously-incomplete input
+  const inTable = (table) =>
+    store.list(table).some((p) => p.id !== excludeProfileId && normalizePhone(p.phone) === normalized);
+  return inTable('supplier_profiles') || inTable('customer_profiles');
+}
+
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
 function randomLetter() {

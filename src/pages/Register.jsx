@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { accounts } from "@/lib/accounts";
+import { requestOTP } from "@/lib/otp";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,18 +21,25 @@ export default function Register() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
-    if (password !== confirmPassword) {
+    // Read straight from the form as a fallback: some mobile browsers /
+    // password managers fill inputs at the DOM level without firing
+    // React's onChange, which previously left the email/password state
+    // empty even though the fields looked filled in.
+    const data = new FormData(e.target);
+    const finalEmail = (data.get("email") || email || "").toString();
+    const finalPassword = (data.get("password") || password || "").toString();
+    const finalConfirm = (data.get("confirm") || confirmPassword || "").toString();
+
+    if (finalPassword !== finalConfirm) {
       setError("Passwords do not match");
       return;
     }
     setLoading(true);
     try {
-      const account = accounts.register(email, password);
-      // Hand off to the existing onboarding flow to pick a role (supplier
-      // or retailer) and fill in the business/shop profile. Onboarding
-      // links the finished profile back to this account.
+      const account = accounts.register(finalEmail, finalPassword);
+      const code = requestOTP(`email:${account.email}`);
       const roleQuery = roleParam ? `&role=${roleParam}` : "";
-      navigate(`/onboarding?accountId=${account.id}${roleQuery}`);
+      navigate(`/verify-email?accountId=${account.id}${roleQuery}&demoCode=${code}`);
     } catch (err) {
       setError(err.message || "Registration failed");
       setLoading(false);
@@ -65,6 +73,7 @@ export default function Register() {
             <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" aria-hidden="true" />
             <Input
               id="email"
+              name="email"
               type="email"
               autoComplete="email"
               autoFocus
@@ -82,6 +91,7 @@ export default function Register() {
             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" aria-hidden="true" />
             <Input
               id="password"
+              name="password"
               type="password"
               autoComplete="new-password"
               placeholder="At least 6 characters"
@@ -99,6 +109,7 @@ export default function Register() {
             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" aria-hidden="true" />
             <Input
               id="confirm"
+              name="confirm"
               type="password"
               autoComplete="new-password"
               placeholder="••••••••"

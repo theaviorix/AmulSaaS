@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { accounts } from "@/lib/accounts";
 import { store } from "@/lib/store";
+import { requestOTP } from "@/lib/otp";
 import { useSession } from "@/lib/AppSession";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +15,7 @@ export default function Login() {
   const { setSession } = useSession();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(true);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -21,8 +23,16 @@ export default function Login() {
     e.preventDefault();
     setError("");
     setLoading(true);
+    // Read straight from the form as a fallback: some mobile browsers /
+    // password managers autofill inputs at the DOM level without firing
+    // React's onChange, which previously left the email/password state
+    // empty (and login failing with "Invalid email or password") even
+    // though the fields looked filled in on screen.
+    const data = new FormData(e.target);
+    const finalEmail = (data.get("email") || email || "").toString();
+    const finalPassword = (data.get("password") || password || "").toString();
     try {
-      const account = accounts.login(email, password);
+      const account = accounts.login(finalEmail, finalPassword);
 
       if (!account.role || !account.profileId) {
         // Registered but never finished setting up their business/shop profile.
@@ -37,6 +47,7 @@ export default function Login() {
           role: "supplier",
           userId: account.userId,
           profileId: account.profileId,
+          remember,
         });
         navigate("/supplier");
         return;
@@ -56,9 +67,15 @@ export default function Login() {
         linkId: link?.id,
         supplierUserId: link?.supplier_user_id,
         supplierProfileId: link?.supplier_profile_id,
+        remember,
       });
       navigate("/customer/new-order");
     } catch (err) {
+      if (err.code === "EMAIL_NOT_VERIFIED") {
+        const code = requestOTP(`email:${finalEmail.trim().toLowerCase()}`);
+        navigate(`/verify-email?accountId=${err.accountId}&demoCode=${code}`);
+        return;
+      }
       setError(err.message || "Invalid email or password");
       setLoading(false);
     }
@@ -91,6 +108,7 @@ export default function Login() {
             <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" aria-hidden="true" />
             <Input
               id="email"
+              name="email"
               type="email"
               autoComplete="email"
               autoFocus
@@ -113,6 +131,7 @@ export default function Login() {
             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" aria-hidden="true" />
             <Input
               id="password"
+              name="password"
               type="password"
               autoComplete="current-password"
               placeholder="••••••••"
@@ -123,6 +142,15 @@ export default function Login() {
             />
           </div>
         </div>
+        <label className="flex items-center gap-2 text-sm text-muted-foreground select-none cursor-pointer">
+          <input
+            type="checkbox"
+            checked={remember}
+            onChange={(e) => setRemember(e.target.checked)}
+            className="w-4 h-4 rounded border-mist accent-primary"
+          />
+          Remember me
+        </label>
         <Button type="submit" className="w-full h-12 font-medium" disabled={loading}>
           {loading ? (
             <>

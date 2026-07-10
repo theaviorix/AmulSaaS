@@ -12,7 +12,6 @@ export function maybeSeed() {
     phone: "98250 11224",
     address: "Plot 14, Dairy Lane, Anand, Gujarat",
     gstin: "24ABCDE1234F1Z5",
-    upi_id: "sharmadairy@upi",
     invite_code: "SHARMA-482",
   });
 

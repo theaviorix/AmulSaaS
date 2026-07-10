@@ -42,7 +42,6 @@ export default function EditProfile() {
           phone: profile?.phone || '',
           address: profile?.address || '',
           gstin: profile?.gstin || '',
-          upi_id: profile?.upi_id || '',
         }
       : {
           shop_name: profile?.shop_name || '',
@@ -153,7 +152,7 @@ export default function EditProfile() {
       </div>
 
       <div className="rounded-2xl border border-mist bg-surface p-6 shadow-sm flex items-center gap-5">
-        <div className="relative">
+        <div className="relative w-20 h-20 shrink-0 grow-0">
           <Avatar src={avatar} name={displayName} size="lg" />
           {avatarUploading && (
             <span className="absolute inset-0 rounded-full bg-ink/40 grid place-items-center">
@@ -161,10 +160,10 @@ export default function EditProfile() {
             </span>
           )}
         </div>
-        <div className="space-y-2">
+        <div className="space-y-2 min-w-0">
           <p className="text-sm font-medium text-ink">Profile photo</p>
           <p className="text-xs text-ink2">Shown to your {isSupplier ? 'retailers' : 'supplier'} in chat and history.</p>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <button type="button" onClick={() => fileInputRef.current?.click()} disabled={avatarUploading} className="inline-flex items-center gap-1.5 text-xs font-medium bg-jet text-surface px-3 py-2 rounded-lg hover:bg-ink transition-colors disabled:opacity-50">
               <Camera size={13} /> {avatar ? 'Change photo' : 'Upload photo'}
             </button>
@@ -193,13 +192,21 @@ export default function EditProfile() {
               <Field label="GSTIN" value={form.gstin} onChange={set('gstin')} />
             </div>
             <Field label="Address" value={form.address} onChange={set('address')} />
-            <Field label="UPI ID" value={form.upi_id} onChange={set('upi_id')} />
             {profile.invite_code && (
               <label className="block">
                 <span className="text-xs font-medium text-ink2 mb-1.5 block">Invite code</span>
-                <div className="flex gap-2">
-                  <input readOnly value={profile.invite_code} className="flex-1 rounded-xl border border-mist bg-canvas px-3.5 py-3 text-ink text-[16px] font-mono" />
-                  <button type="button" onClick={copyInviteCode} className="px-4 rounded-xl border border-mist text-ink2 hover:bg-canvas transition-colors">
+                <div className="flex gap-2 min-w-0">
+                  <input
+                    readOnly
+                    value={profile.invite_code}
+                    className="flex-1 min-w-0 w-full rounded-xl border border-mist bg-canvas px-3.5 py-3 text-ink text-[16px] font-mono truncate"
+                  />
+                  <button
+                    type="button"
+                    onClick={copyInviteCode}
+                    className="shrink-0 w-11 h-11 self-center grid place-items-center rounded-xl border border-mist text-ink2 hover:bg-canvas transition-colors"
+                    aria-label="Copy invite code"
+                  >
                     <Copy size={16} />
                   </button>
                 </div>

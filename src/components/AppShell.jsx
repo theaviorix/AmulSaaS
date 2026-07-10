@@ -8,6 +8,7 @@ import { checkAndFireReminder } from '@/lib/orderReminder';
 import NotificationBell from '@/components/NotificationBell';
 import Avatar from '@/components/Avatar';
 import Logo from '@/components/Logo';
+import Modal from '@/components/Modal';
 
 const NAV = {
   supplier: [
@@ -27,7 +28,7 @@ const NAV = {
   ],
 };
 
-function Sidebar({ nav, exit, unreadMessages, avatar, displayName }) {
+function Sidebar({ nav, onLogoutClick, unreadMessages, avatar, displayName }) {
   return (
     <>
       <nav className="flex-1 px-3 py-4 space-y-1">
@@ -46,7 +47,7 @@ function Sidebar({ nav, exit, unreadMessages, avatar, displayName }) {
           <Avatar src={avatar} name={displayName} size="xs" />
           My Profile
         </NavLink>
-        <button onClick={exit} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-ink2 hover:bg-canvas hover:text-ink transition-colors">
+        <button onClick={onLogoutClick} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-ink2 hover:bg-canvas hover:text-ink transition-colors">
           <LogOut size={18} /> Log out
         </button>
       </div>
@@ -59,9 +60,20 @@ export default function AppShell() {
   const liveStore = useStore();
   const navigate = useNavigate();
   const location = useLocation();
-  const [drawer, setDrawer] = useState(false);
+  const [drawer, setDrawer] = useState(false); // mounted?
+  const [drawerVisible, setDrawerVisible] = useState(false); // slid into view?
+  const [confirmLogout, setConfirmLogout] = useState(false);
 
-  useEffect(() => { setDrawer(false); }, [location.pathname]);
+  useEffect(() => { closeDrawer(); }, [location.pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const openDrawer = () => {
+    setDrawer(true);
+    requestAnimationFrame(() => requestAnimationFrame(() => setDrawerVisible(true)));
+  };
+  const closeDrawer = () => {
+    setDrawerVisible(false);
+    setTimeout(() => setDrawer(false), 250);
+  };
 
   let avatar = null;
   let displayName = '';
@@ -100,33 +112,59 @@ export default function AppShell() {
   if (!isProfileArea && session.role === 'supplier' && !isSupplierArea) return <Navigate to="/supplier" replace />;
   const nav = NAV[session.role] || [];
   const roleLabel = session.role === 'supplier' ? 'Supplier' : 'Retailer';
-  const exit = () => { clearSession(); navigate('/'); };
+  const doLogout = () => { setConfirmLogout(false); clearSession(); navigate('/'); };
 
   return (
     <div className="min-h-screen bg-canvas">
       <aside className="hidden lg:flex fixed inset-y-0 left-0 w-64 bg-surface border-r border-mist flex-col">
         <div className="h-16 flex items-center px-5 border-b border-mist"><Logo /></div>
-        <Sidebar nav={nav} exit={exit} unreadMessages={unreadMessages} avatar={avatar} displayName={displayName} />
+        <Sidebar nav={nav} onLogoutClick={() => setConfirmLogout(true)} unreadMessages={unreadMessages} avatar={avatar} displayName={displayName} />
       </aside>
 
       <div className="lg:hidden sticky top-0 z-40 bg-surface/90 backdrop-blur border-b border-mist h-14 flex items-center justify-between px-4">
-        <button onClick={() => setDrawer(true)} className="p-2 -ml-2 text-ink"><Menu size={22} /></button>
+        <button onClick={openDrawer} className="p-2 -ml-2 text-ink"><Menu size={22} /></button>
         <Logo compact />
         <div className="w-9" />
       </div>
 
       {drawer && (
         <div className="lg:hidden fixed inset-0 z-50">
-          <div className="absolute inset-0 bg-ink/40" onClick={() => setDrawer(false)} />
-          <div className="absolute inset-y-0 left-0 w-72 bg-surface flex flex-col">
+          <div
+            className={`absolute inset-0 bg-ink/40 transition-opacity duration-200 ${drawerVisible ? 'opacity-100' : 'opacity-0'}`}
+            onClick={closeDrawer}
+          />
+          <div
+            className={`absolute inset-y-0 left-0 w-72 bg-surface flex flex-col shadow-2xl transition-transform duration-200 ease-out ${
+              drawerVisible ? 'translate-x-0' : '-translate-x-full'
+            }`}
+          >
             <div className="h-14 flex items-center justify-between px-4 border-b border-mist">
               <Logo compact />
-              <button onClick={() => setDrawer(false)} className="p-2"><X size={20} /></button>
+              <button onClick={closeDrawer} className="p-2"><X size={20} /></button>
             </div>
-            <Sidebar nav={nav} exit={exit} unreadMessages={unreadMessages} avatar={avatar} displayName={displayName} />
+            <Sidebar nav={nav} onLogoutClick={() => setConfirmLogout(true)} unreadMessages={unreadMessages} avatar={avatar} displayName={displayName} />
           </div>
         </div>
       )}
+
+      <Modal
+        open={confirmLogout}
+        onClose={() => setConfirmLogout(false)}
+        title="Log out?"
+        size="sm"
+        footer={
+          <>
+            <button onClick={() => setConfirmLogout(false)} className="px-4 py-2.5 rounded-xl border border-mist text-ink font-medium hover:bg-canvas transition-colors">
+              Cancel
+            </button>
+            <button onClick={doLogout} className="px-4 py-2.5 rounded-xl bg-jet text-surface font-medium hover:bg-ink transition-colors">
+              Log out
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm text-ink2">You'll need to log in again to access your {roleLabel.toLowerCase()} workspace.</p>
+      </Modal>
 
       <div className="lg:pl-64">
         <header className="hidden lg:flex h-16 items-center justify-between px-6 bg-surface/60 backdrop-blur border-b border-mist">
