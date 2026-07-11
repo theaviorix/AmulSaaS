@@ -1,13 +1,11 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { Store, ShoppingCart, ArrowLeft, ArrowRight, Loader2 } from 'lucide-react';
 import { useSession } from '@/lib/AppSession';
 import { supabase } from '@/lib/supabaseClient';
 import { setMyRole, getErrorMessage } from '@/lib/supabaseAuth';
+import { generateFreeInviteCode } from '@/lib/inviteCode';
 import Logo from '@/components/Logo';
-
-const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-const randomLetter = () => ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
 
 function Field({ label, value, onChange, placeholder, type = 'text', required }) {
   return (
@@ -24,26 +22,13 @@ function Field({ label, value, onChange, placeholder, type = 'text', required })
   );
 }
 
-// Generates a candidate invite code from the business name and confirms
-// it's actually free in the database (retrying on the rare collision —
-// the column also has a UNIQUE constraint as a hard backstop).
-async function generateFreeInviteCode(businessName) {
-  const lettersFromName = (businessName || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
-  for (let attempt = 0; attempt < 10; attempt++) {
-    let base = lettersFromName;
-    while (base.length < 4) base += randomLetter();
-    const suffix = Math.floor(100 + Math.random() * 900);
-    const code = `${base}-${suffix}`;
-    const { data } = await supabase.from('supplier_profiles').select('id').eq('invite_code', code).maybeSingle();
-    if (!data) return code;
-  }
-  return `SHOP-${Date.now().toString(36).toUpperCase()}`;
-}
-
 export default function Onboarding() {
   const navigate = useNavigate();
   const { session, refreshSession } = useSession();
-  const [role, setRole] = useState(null);
+  const [searchParams] = useSearchParams();
+  const roleParam = searchParams.get('role');
+  const initialRole = roleParam === 'supplier' || roleParam === 'customer' ? roleParam : null;
+  const [role, setRole] = useState(initialRole);
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({ business_name: '', shop_name: '', owner_name: '', phone: '', address: '', gstin: '', invite_code: '' });
   const [error, setError] = useState('');

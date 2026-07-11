@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { signIn, updatePassword, getErrorMessage } from '@/lib/supabaseAuth';
 import { toast } from '@/components/ui/use-toast';
 import { compressImageFile } from '@/lib/exportUtils';
+import { ensureInviteCode } from '@/lib/inviteCode';
 import Avatar from '@/components/Avatar';
 import { UserCircle, Store, ShoppingCart, Lock, Loader2, Copy, Camera, Trash2 } from 'lucide-react';
 
@@ -56,7 +57,7 @@ export default function EditProfile() {
         setLoadingProfile(false);
         return;
       }
-      setProfile(data);
+      setProfile(isSupplier && !data.invite_code ? await ensureInviteCode(data) : data);
       setForm(isSupplier
         ? { business_name: data.business_name || '', owner_name: data.owner_name || '', phone: data.phone || '', address: data.address || '', gstin: data.gstin || '' }
         : { shop_name: data.shop_name || '', owner_name: data.owner_name || '', phone: data.phone || '', address: data.address || '' }

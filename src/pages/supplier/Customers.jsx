@@ -6,6 +6,7 @@ import { useSession } from '@/lib/AppSession';
 import { supabase } from '@/lib/supabaseClient';
 import { inr } from '@/lib/store';
 import { notify } from '@/lib/notify';
+import { ensureInviteCode } from '@/lib/inviteCode';
 import PageHeader from '@/components/PageHeader';
 import EmptyState from '@/components/EmptyState';
 import StatusPill from '@/components/StatusPill';
@@ -31,8 +32,16 @@ export default function SupplierCustomers() {
     let active = true;
     (async () => {
       if (session.profileId) {
-        const { data } = await supabase.from('supplier_profiles').select('*').eq('id', session.profileId).single();
-        if (active) setProfile(data || null);
+        const { data, error } = await supabase.from('supplier_profiles').select('*').eq('id', session.profileId).single();
+        if (error) console.error('Failed to load supplier profile:', error);
+        if (active) {
+          if (data && !data.invite_code) {
+            const healed = await ensureInviteCode(data);
+            if (active) setProfile(healed);
+          } else {
+            setProfile(data || null);
+          }
+        }
       }
       const { data: linkRows } = await supabase.from('supplier_links').select('*').eq('supplier_user_id', uid);
       if (!active) return;
@@ -108,7 +117,7 @@ export default function SupplierCustomers() {
       <div className="rounded-2xl bg-jet text-surface p-5">
         <p className="text-xs uppercase tracking-widest text-surface/60">Your invite code</p>
         <div className="mt-2 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
-          <p className="font-mono text-3xl font-semibold tracking-wide">{profile?.invite_code}</p>
+          <p className="font-mono text-3xl font-semibold tracking-wide">{profile?.invite_code || (profile ? 'Generating…' : '—')}</p>
           <div className="flex gap-2">
             <CopyButton text={profile?.invite_code} />
             <ShareButton code={profile?.invite_code} business={profile?.business_name} />
