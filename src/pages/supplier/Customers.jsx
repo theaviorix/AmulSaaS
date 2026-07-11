@@ -28,6 +28,9 @@ export default function SupplierCustomers() {
   const [links, setLinks] = useState([]);
   const [customerProfiles, setCustomerProfiles] = useState([]);
   const [linksVersion, setLinksVersion] = useState(0); // bump to refetch links after approve/decline
+  const [inviteCodeError, setInviteCodeError] = useState(false);
+  const [retryTick, setRetryTick] = useState(0); // bump to retry invite-code generation
+
   useEffect(() => {
     let active = true;
     (async () => {
@@ -37,9 +40,16 @@ export default function SupplierCustomers() {
         if (active) {
           if (data && !data.invite_code) {
             const healed = await ensureInviteCode(data);
-            if (active) setProfile(healed);
+            if (active) {
+              setProfile(healed);
+              // ensureInviteCode() falls back to returning the original profile
+              // unchanged if it couldn't save a code (e.g. write blocked by an
+              // RLS policy) — surface that instead of silently showing nothing.
+              setInviteCodeError(!healed?.invite_code);
+            }
           } else {
             setProfile(data || null);
+            setInviteCodeError(!error && !data?.invite_code);
           }
         }
       }
@@ -53,7 +63,7 @@ export default function SupplierCustomers() {
       }
     })();
     return () => { active = false; };
-  }, [session.profileId, uid, linksVersion]);
+  }, [session.profileId, uid, linksVersion, retryTick]);
   const pending = links.filter((l) => l.status === 'pending');
   const activeAll = links.filter((l) => l.status === 'active');
   const bills = store.filter('bills', (b) => b.supplier_user_id === uid);
@@ -117,13 +127,24 @@ export default function SupplierCustomers() {
       <div className="rounded-2xl bg-jet text-surface p-5">
         <p className="text-xs uppercase tracking-widest text-surface/60">Your invite code</p>
         <div className="mt-2 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
-          <p className="font-mono text-3xl font-semibold tracking-wide">{profile?.invite_code || (profile ? 'Generating…' : '—')}</p>
+          <p className="font-mono text-3xl font-semibold tracking-wide">
+            {profile?.invite_code ? profile.invite_code : inviteCodeError ? 'Unavailable' : profile ? 'Generating…' : '—'}
+          </p>
           <div className="flex gap-2">
             <CopyButton text={profile?.invite_code} />
             <ShareButton code={profile?.invite_code} business={profile?.business_name} />
           </div>
         </div>
-        <p className="mt-3 text-sm text-surface/60">Share this with your retailers so they can link to your price list.</p>
+        {inviteCodeError ? (
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <p className="text-sm text-alert">Couldn't generate an invite code. Please try again.</p>
+            <button onClick={() => setRetryTick((t) => t + 1)} className="shrink-0 text-xs font-medium px-3 py-1.5 rounded-lg bg-surface/15 text-surface hover:bg-surface/25 transition-colors">
+              Retry
+            </button>
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-surface/60">Share this with your retailers so they can link to your price list.</p>
+        )}
       </div>
 
       {pending.length > 0 && (
@@ -248,15 +269,31 @@ function CustomerRow({ l, avatar, balance, onNudge }) {
 
 function CopyButton({ text }) {
   const [done, setDone] = useState(false);
-  const copy = () => { navigator.clipboard?.writeText(text); setDone(true); setTimeout(() => setDone(false), 1500); };
+  const copy = () => {
+    if (!text) return;
+    navigator.clipboard?.writeText(text);
+    setDone(true);
+    setTimeout(() => setDone(false), 1500);
+  };
   return (
-    <button onClick={copy} className="inline-flex items-center gap-1.5 text-sm font-medium bg-surface text-jet px-4 py-2.5 rounded-xl hover:bg-canvas transition-colors">
+    <button
+      onClick={copy}
+      disabled={!text}
+      className="inline-flex items-center gap-1.5 text-sm font-medium bg-surface text-jet px-4 py-2.5 rounded-xl hover:bg-canvas transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-surface"
+    >
       {done ? <><Check size={15} /> Copied</> : <><Copy size={15} /> Copy</>}
     </button>
   );
 }
 
 function ShareButton({ code, business }) {
+  if (!code) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-sm font-medium bg-surface/15 text-surface/40 px-4 py-2.5 rounded-xl cursor-not-allowed">
+        <Share2 size={15} /> WhatsApp
+      </span>
+    );
+  }
   const msg = `Hi! Join ${business || 'my'} network on Amul Connect using invite code: ${code}`;
   return (
     <a href={`https://wa.me/?text=${encodeURIComponent(msg)}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-sm font-medium bg-surface/15 text-surface px-4 py-2.5 rounded-xl hover:bg-surface/25 transition-colors">
