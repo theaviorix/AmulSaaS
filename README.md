@@ -1,43 +1,26 @@
-# Base44 Project
+# Amul Connect
 
-Use this repository to run and edit the app locally, then publish changes back through Base44.
-
-Any change pushed to the repo will also be reflected in the Base44 Builder.
+A supplier–retailer ordering & billing app, built with React + Vite and backed by Supabase (Postgres, Auth, Edge Functions).
 
 ## Prerequisites
 
-1. Clone the repository using the project's Git URL.
+1. Clone the repository.
 2. Navigate to the project directory.
 3. Install dependencies: `npm install`.
-4. Install the Base44 CLI: `npm install -g base44@latest`.
+4. A Supabase project (create one at [supabase.com](https://supabase.com) if you don't have one).
 
-See the [Base44 CLI docs](https://docs.base44.com/developers/references/cli/get-started/overview) if you want to run Base44 commands directly.
+## Environment variables
 
-## Run Locally
-
-Run the full local development environment from the project root:
+Create a `.env.local` file in the project root:
 
 ```bash
-base44 dev
+VITE_SUPABASE_URL=https://your-project-ref.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-`base44 dev` starts the local Base44 development backend and, when this app is configured for it, also starts the frontend dev server for you. Use the frontend URL printed by the command.
+Both values are in your Supabase project's **Settings → API** page.
 
-For example, when the Base44 project config includes a `serveCommand`, `base44 dev` can launch the frontend too:
-
-```json5
-{
-  "site": {
-    "serveCommand": "npm run dev"
-  }
-}
-```
-
-In a Base44 project this lives in `base44/config.jsonc`.
-
-## Run Only The Frontend
-
-If you only want to work on the frontend against the hosted Base44 backend, run:
+## Run locally
 
 ```bash
 npm run dev
@@ -45,33 +28,27 @@ npm run dev
 
 Open the local URL printed by Vite.
 
-## Use The Hosted Backend
-
-For frontend-only development, create or update `.env.local` in the project root:
+## Build for production
 
 ```bash
-VITE_BASE44_APP_ID=your_app_id
-VITE_BASE44_APP_BASE_URL=https://your-app.base44.app
+npm run build
 ```
 
-`VITE_BASE44_APP_ID` identifies the Base44 app.
+Output is written to `./dist`.
 
-`VITE_BASE44_APP_BASE_URL` tells the Base44 Vite plugin where to send local `/api` requests. Point it at your deployed Base44 app URL when you want the local frontend to use the hosted backend.
+## Database
 
-When you use `base44 dev`, the command injects the local Base44 values for you, so `.env.local` is mainly needed for frontend-only workflows.
+The app expects the following tables in your Supabase project's `public` schema: `profiles`, `supplier_profiles`, `customer_profiles`, `supplier_links`, `products`, `orders`, `bills`, `notifications`, `reviews`. Row Level Security (RLS) should be enabled on all of them, scoped to the authenticated user (see existing policies in the Supabase dashboard for the pattern to follow when adding new tables).
 
-## Publish Your Changes
+## Edge Functions
 
-After pushing your changes to git, open the Base44 dashboard and publish the app:
+Some features (e.g. account deletion) require server-side logic that can't safely run in the browser, and are implemented as Supabase Edge Functions in `supabase/functions/`. Deploy them with the [Supabase CLI](https://supabase.com/docs/guides/cli):
 
 ```bash
-base44 dashboard open
+supabase link --project-ref your-project-ref
+supabase functions deploy delete-account
 ```
 
-## Docs & Support
+## Deploying the frontend
 
-Documentation: [https://docs.base44.com/Integrations/Using-GitHub](https://docs.base44.com/Integrations/Using-GitHub)
-
-Base44 CLI command reference: [https://docs.base44.com/developers/references/cli/commands/introduction](https://docs.base44.com/developers/references/cli/commands/introduction)
-
-Support: [https://app.base44.com/support](https://app.base44.com/support)
+This is a static Vite app — deploy the `dist/` output to Vercel, Netlify, or any static host. A `vercel.json` is included for Vercel deployments.

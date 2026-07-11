@@ -22,7 +22,6 @@ export default function Footer() {
         </div>
         <div className="mt-10 pt-6 border-t border-surface/15 flex flex-col sm:flex-row justify-between gap-2 text-xs text-surface/50">
           <p>© {new Date().getFullYear()} Amul Connect. All rights reserved.</p>
-          <p>A reference SaaS model · Built on Base44</p>
         </div>
       </div>
     </footer>

@@ -1,12 +1,14 @@
 import React, { useRef, useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useSession } from '@/lib/AppSession';
 import { supabase } from '@/lib/supabaseClient';
-import { signIn, updatePassword, getErrorMessage } from '@/lib/supabaseAuth';
+import { signIn, updatePassword, signOut, getErrorMessage } from '@/lib/supabaseAuth';
 import { toast } from '@/components/ui/use-toast';
 import { compressImageFile } from '@/lib/exportUtils';
 import { ensureInviteCode } from '@/lib/inviteCode';
 import Avatar from '@/components/Avatar';
-import { UserCircle, Store, ShoppingCart, Lock, Loader2, Copy, Camera, Trash2 } from 'lucide-react';
+import Modal from '@/components/Modal';
+import { UserCircle, Store, ShoppingCart, Lock, Loader2, Copy, Camera, Trash2, AlertTriangle } from 'lucide-react';
 
 function Field({ label, value, onChange, placeholder, type = 'text', required, readOnly }) {
   return (
@@ -30,6 +32,7 @@ function Field({ label, value, onChange, placeholder, type = 'text', required, r
 
 export default function EditProfile() {
   const { session } = useSession();
+  const navigate = useNavigate();
   const isSupplier = session?.role === 'supplier';
   const table = isSupplier ? 'supplier_profiles' : 'customer_profiles';
 
@@ -45,6 +48,11 @@ export default function EditProfile() {
 
   const [avatarUploading, setAvatarUploading] = useState(false);
   const fileInputRef = useRef(null);
+
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   useEffect(() => {
     if (!session?.profileId) return;
@@ -146,6 +154,32 @@ export default function EditProfile() {
     if (!profile.invite_code) return;
     navigator.clipboard?.writeText(profile.invite_code);
     toast({ title: 'Copied', description: 'Invite code copied to clipboard.' });
+  };
+
+  const CONFIRM_WORD = 'DELETE';
+  const deleteAccount = async () => {
+    if (deleteConfirmText.trim().toUpperCase() !== CONFIRM_WORD) return;
+    setDeleteError('');
+    setDeleting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('delete-account');
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      toast({ title: 'Account deleted', description: 'Your account and data have been permanently removed.' });
+      await signOut();
+      navigate('/', { replace: true });
+    } catch (err) {
+      setDeleteError(getErrorMessage(err, 'Could not delete your account. Please try again or contact support.'));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const closeDeleteModal = () => {
+    if (deleting) return;
+    setDeleteOpen(false);
+    setDeleteConfirmText('');
+    setDeleteError('');
   };
 
   return (
@@ -278,6 +312,68 @@ export default function EditProfile() {
           Update password
         </button>
       </form>
+
+      <div className="rounded-2xl border border-alert/30 bg-alert/5 p-6 space-y-3">
+        <div className="flex items-center gap-2 text-sm font-medium text-alert">
+          <AlertTriangle size={16} /> Danger zone
+        </div>
+        <p className="text-sm text-ink2">
+          Deleting your account permanently removes your profile, {isSupplier ? 'products, and linked retailer history' : 'orders, and bill history'}, and frees up{' '}
+          <span className="font-medium text-ink">{session?.email}</span> to be used again. This action is <span className="font-semibold text-alert">unrecoverable — there is no way to undo it or restore your data.</span>
+        </p>
+        <button
+          type="button"
+          onClick={() => setDeleteOpen(true)}
+          className="inline-flex items-center gap-1.5 text-sm font-medium border border-alert/40 text-alert px-4 py-2.5 rounded-xl hover:bg-alert/10 transition-colors"
+        >
+          <Trash2 size={15} /> Delete my account
+        </button>
+      </div>
+
+      <Modal open={deleteOpen} onClose={closeDeleteModal} title="Delete account" size="sm">
+        <div className="space-y-4">
+          <div className="rounded-xl border border-alert/30 bg-alert/5 p-3.5 flex gap-2.5">
+            <AlertTriangle size={18} className="text-alert shrink-0 mt-0.5" />
+            <p className="text-sm text-ink">
+              This will permanently delete your account, email ({session?.email}), and all associated data.
+              <span className="font-semibold"> This cannot be undone — your account will be unrecoverable.</span>
+            </p>
+          </div>
+          <label className="block">
+            <span className="text-xs font-medium text-ink2 mb-1.5 block">
+              Type <span className="font-mono font-semibold text-ink">{CONFIRM_WORD}</span> to confirm
+            </span>
+            <input
+              type="text"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              placeholder={CONFIRM_WORD}
+              disabled={deleting}
+              className="w-full rounded-xl border border-mist bg-surface px-3.5 py-3 text-ink text-[16px] outline-none focus:border-alert transition-colors"
+            />
+          </label>
+          {deleteError && <p className="text-sm text-alert">{deleteError}</p>}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={closeDeleteModal}
+              disabled={deleting}
+              className="flex-1 px-4 py-3 rounded-xl border border-mist text-ink font-medium hover:bg-canvas transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={deleteAccount}
+              disabled={deleting || deleteConfirmText.trim().toUpperCase() !== CONFIRM_WORD}
+              className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-alert text-surface font-medium hover:bg-alert/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {deleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={15} />}
+              Delete permanently
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
