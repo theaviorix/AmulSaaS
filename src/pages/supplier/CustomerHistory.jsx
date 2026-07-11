@@ -1,8 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Download, Printer, ScrollText, Package } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { useSession } from '@/lib/AppSession';
+import { supabase } from '@/lib/supabaseClient';
 import { inr } from '@/lib/store';
 import { downloadPDF } from '@/lib/exportUtils';
 import Avatar from '@/components/Avatar';
@@ -15,10 +16,29 @@ export default function SupplierCustomerHistory() {
   const store = useStore();
   const { session } = useSession();
   const uid = session.userId;
-  const supplierProfile = store.find('supplier_profiles', (s) => s.id === session.profileId);
+  const [supplierProfile, setSupplierProfile] = useState(null);
+  const [link, setLink] = useState(null);
+  const [customerProfile, setCustomerProfile] = useState(null);
+  const [loadingProfiles, setLoadingProfiles] = useState(true);
 
-  const link = store.get('supplier_links', linkId);
-  const customerProfile = link ? store.find('customer_profiles', (c) => c.id === link.customer_profile_id) : null;
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      if (session.profileId) {
+        const { data: sp } = await supabase.from('supplier_profiles').select('*').eq('id', session.profileId).single();
+        if (active) setSupplierProfile(sp || null);
+      }
+      const { data: l } = await supabase.from('supplier_links').select('*').eq('id', linkId).single();
+      if (!active) return;
+      setLink(l || null);
+      if (l?.customer_profile_id) {
+        const { data: cp } = await supabase.from('customer_profiles').select('*').eq('id', l.customer_profile_id).single();
+        if (active) setCustomerProfile(cp || null);
+      }
+      setLoadingProfiles(false);
+    })();
+    return () => { active = false; };
+  }, [session.profileId, linkId]);
 
   const [sort, setSort] = useState('newest');
 
@@ -33,6 +53,10 @@ export default function SupplierCustomerHistory() {
     return store.filter('bills', (b) => b.supplier_user_id === uid && b.customer_user_id === link.customer_user_id)
       .sort((a, b) => sort === 'newest' ? new Date(b.created_date) - new Date(a.created_date) : new Date(a.created_date) - new Date(b.created_date));
   }, [store, uid, link, sort]);
+
+  if (loadingProfiles) {
+    return <div className="w-8 h-8 border-4 border-mist border-t-ink rounded-full animate-spin" />;
+  }
 
   if (!link) {
     return (

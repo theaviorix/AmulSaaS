@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ShoppingCart, Plus, Minus, Repeat, BellRing, ChevronDown, Check } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { useSession } from '@/lib/AppSession';
+import { supabase } from '@/lib/supabaseClient';
 import { inr } from '@/lib/store';
 import { notify } from '@/lib/notify';
 import { getReminderSettings, setReminderSettings } from '@/lib/orderReminder';
@@ -16,10 +17,22 @@ export default function CustomerNewOrder() {
   const { session } = useSession();
   const navigate = useNavigate();
   const supUid = session.supplierUserId;
-  const profile = store.find('customer_profiles', (c) => c.id === session.profileId);
-  const shopName = profile?.shop_name || 'Shop';
-  const products = store.filter('products', (p) => p.supplier_user_id === supUid && p.active)
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const [shopName, setShopName] = useState('Shop');
+  const [products, setProducts] = useState([]);
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      if (session.profileId) {
+        const { data } = await supabase.from('customer_profiles').select('shop_name').eq('id', session.profileId).single();
+        if (active && data?.shop_name) setShopName(data.shop_name);
+      }
+      if (supUid) {
+        const { data } = await supabase.from('products').select('*').eq('supplier_user_id', supUid).eq('active', true);
+        if (active) setProducts((data || []).sort((a, b) => a.name.localeCompare(b.name)));
+      }
+    })();
+    return () => { active = false; };
+  }, [session.profileId, supUid]);
   const orders = store.filter('orders', (o) => o.customer_user_id === session.userId);
   const last = [...orders].sort((a, b) => new Date(b.created_date) - new Date(a.created_date))[0];
 

@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Wallet, Package, Star, Download } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { useSession } from '@/lib/AppSession';
+import { supabase } from '@/lib/supabaseClient';
 import { inr } from '@/lib/store';
 import { downloadPDF } from '@/lib/exportUtils';
 import PageHeader from '@/components/PageHeader';
@@ -21,7 +22,16 @@ export default function CustomerBills() {
   const outstanding = allBills.filter((b) => b.status !== 'paid').reduce((s, b) => s + (b.total - b.paid_amount), 0);
   const allOrders = store.filter('orders', (o) => o.customer_user_id === uid).sort((a, b) => new Date(b.created_date) - new Date(a.created_date));
   const reviews = store.filter('reviews', (r) => r.customer_user_id === uid);
-  const myProfile = store.find('customer_profiles', (c) => c.id === session.profileId);
+  const [myProfile, setMyProfile] = useState(null);
+  useEffect(() => {
+    if (!session.profileId) return;
+    let active = true;
+    (async () => {
+      const { data } = await supabase.from('customer_profiles').select('*').eq('id', session.profileId).single();
+      if (active) setMyProfile(data || null);
+    })();
+    return () => { active = false; };
+  }, [session.profileId]);
 
   const [q, setQ] = useState('');
   const [sort, setSort] = useState('newest');

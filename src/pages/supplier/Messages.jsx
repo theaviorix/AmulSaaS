@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { MessageCircle, ArrowLeft } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { useSession } from '@/lib/AppSession';
+import { supabase } from '@/lib/supabaseClient';
 import { threadMessages, sendMessage, markThreadRead, unreadCountForSupplier } from '@/lib/chat';
 import Avatar from '@/components/Avatar';
 import ChatThread from '@/components/ChatThread';
@@ -12,9 +13,27 @@ export default function SupplierMessages() {
   const store = useStore();
   const { session } = useSession();
   const uid = session.userId;
-  const profile = store.find('supplier_profiles', (s) => s.id === session.profileId);
-  const links = store.filter('supplier_links', (l) => l.supplier_user_id === uid && l.status === 'active');
-  const customerProfiles = store.list('customer_profiles');
+  const [profile, setProfile] = useState(null);
+  const [links, setLinks] = useState([]);
+  const [customerProfiles, setCustomerProfiles] = useState([]);
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      if (session.profileId) {
+        const { data } = await supabase.from('supplier_profiles').select('*').eq('id', session.profileId).single();
+        if (active) setProfile(data || null);
+      }
+      const { data: linkRows } = await supabase.from('supplier_links').select('*').eq('supplier_user_id', uid).eq('status', 'active');
+      if (!active) return;
+      setLinks(linkRows || []);
+      const profileIds = (linkRows || []).map((l) => l.customer_profile_id).filter(Boolean);
+      if (profileIds.length) {
+        const { data: custRows } = await supabase.from('customer_profiles').select('*').in('id', profileIds);
+        if (active) setCustomerProfiles(custRows || []);
+      }
+    })();
+    return () => { active = false; };
+  }, [session.profileId, uid]);
 
   const [q, setQ] = useState('');
   const [activeId, setActiveId] = useState(null);

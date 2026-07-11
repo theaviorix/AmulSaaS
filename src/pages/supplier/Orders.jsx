@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { ClipboardList, Check, Truck, ScrollText, Pencil, X, Boxes, Zap, MessageSquareWarning } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { useSession } from '@/lib/AppSession';
+import { supabase } from '@/lib/supabaseClient';
 import { inr } from '@/lib/store';
 import { notify } from '@/lib/notify';
 import { roundToStep } from '@/lib/quantity';
@@ -23,7 +24,15 @@ export default function SupplierOrders() {
   const [addProductId, setAddProductId] = useState('');
   const [reason, setReason] = useState('');
   const [dispatchListOpen, setDispatchListOpen] = useState(false);
-  const products = store.filter('products', (p) => p.supplier_user_id === uid);
+  const [products, setProducts] = useState([]);
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const { data } = await supabase.from('products').select('*').eq('supplier_user_id', uid);
+      if (active) setProducts(data || []);
+    })();
+    return () => { active = false; };
+  }, [uid]);
 
   const all = store.filter('orders', (o) => o.supplier_user_id === uid)
     .sort((a, b) => sort === 'oldest' ? new Date(a.created_date) - new Date(b.created_date) : new Date(b.created_date) - new Date(a.created_date));

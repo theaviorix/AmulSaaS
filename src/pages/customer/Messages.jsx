@@ -1,7 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { MessageCircle } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { useSession } from '@/lib/AppSession';
+import { supabase } from '@/lib/supabaseClient';
 import { threadMessages, sendMessage, markThreadRead } from '@/lib/chat';
 import Avatar from '@/components/Avatar';
 import ChatThread from '@/components/ChatThread';
@@ -12,8 +13,22 @@ export default function CustomerMessages() {
   const store = useStore();
   const { session } = useSession();
   const supUid = session.supplierUserId;
-  const myProfile = store.find('customer_profiles', (c) => c.id === session.profileId);
-  const supplierProfile = store.find('supplier_profiles', (s) => s.user_id === supUid);
+  const [myProfile, setMyProfile] = useState(null);
+  const [supplierProfile, setSupplierProfile] = useState(null);
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      if (session.profileId) {
+        const { data } = await supabase.from('customer_profiles').select('*').eq('id', session.profileId).single();
+        if (active) setMyProfile(data || null);
+      }
+      if (supUid) {
+        const { data } = await supabase.from('supplier_profiles').select('*').eq('user_id', supUid).single();
+        if (active) setSupplierProfile(data || null);
+      }
+    })();
+    return () => { active = false; };
+  }, [session.profileId, supUid]);
 
   const messages = supUid ? threadMessages(supUid, session.userId) : [];
 

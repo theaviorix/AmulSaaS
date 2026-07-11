@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
-import { Boxes, Plus, Pencil, Trash2 } from 'lucide-react';
-import { useStore } from '@/lib/useStore';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Boxes, Plus, Pencil, Trash2, Loader2 } from 'lucide-react';
 import { useSession } from '@/lib/AppSession';
+import { supabase } from '@/lib/supabaseClient';
+import { getErrorMessage } from '@/lib/supabaseAuth';
+import { toast } from '@/components/ui/use-toast';
 import PageHeader from '@/components/PageHeader';
 import EmptyState from '@/components/EmptyState';
 import SearchInput from '@/components/SearchInput';
@@ -26,29 +28,83 @@ function Toggle({ on, onClick, onLabel, offLabel, tone = 'ink' }) {
 }
 
 export default function SupplierProducts() {
-  const store = useStore();
   const { session } = useSession();
   const uid = session.userId;
-  const all = store.filter('products', (p) => p.supplier_user_id === uid)
-    .sort((a, b) => new Date(b.updated_date) - new Date(a.updated_date));
+
+  const [all, setAll] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
   const products = q.trim() ? all.filter((p) => p.name.toLowerCase().includes(q.trim().toLowerCase())) : all;
 
   const [adding, setAdding] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState({ name: '', unit: '', price: '' });
   const [editPrice, setEditPrice] = useState({});
 
-  const addProduct = () => {
+  const load = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+      .eq('supplier_user_id', uid)
+      .order('updated_at', { ascending: false });
+    if (error) {
+      toast({ title: 'Could not load products', description: getErrorMessage(error) });
+    } else {
+      setAll(data || []);
+    }
+    setLoading(false);
+  }, [uid]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const addProduct = async () => {
     if (!draft.name.trim() || !draft.unit.trim() || !draft.price) return;
-    store.create('products', { supplier_user_id: uid, name: draft.name.trim(), unit: draft.unit.trim(), price: Number(draft.price), active: true, in_stock: true });
+    setSaving(true);
+    const { error } = await supabase.from('products').insert({
+      supplier_user_id: uid,
+      name: draft.name.trim(),
+      unit: draft.unit.trim(),
+      price: Number(draft.price),
+      active: true,
+      in_stock: true,
+    });
+    setSaving(false);
+    if (error) {
+      toast({ title: 'Could not add product', description: getErrorMessage(error) });
+      return;
+    }
     setDraft({ name: '', unit: '', price: '' });
+    load();
+  };
+
+  const updateProduct = async (id, patch) => {
+    // Optimistic update so toggles/price edits feel instant.
+    setAll((cur) => cur.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+    const { error } = await supabase.from('products').update(patch).eq('id', id);
+    if (error) {
+      toast({ title: 'Could not save change', description: getErrorMessage(error) });
+      load(); // revert to real state
+    }
   };
 
   const savePrice = (id) => {
     const val = Number(editPrice[id]);
-    if (val && val > 0) store.update('products', id, { price: val });
+    if (val && val > 0) updateProduct(id, { price: val });
     setEditPrice((e) => { const c = { ...e }; delete c[id]; return c; });
   };
+
+  const removeProduct = async (id) => {
+    setAll((cur) => cur.filter((p) => p.id !== id));
+    const { error } = await supabase.from('products').delete().eq('id', id);
+    if (error) {
+      toast({ title: 'Could not delete product', description: getErrorMessage(error) });
+      load();
+    }
+  };
+
+  if (loading) {
+    return <div className="w-8 h-8 border-4 border-mist border-t-ink rounded-full animate-spin" />;
+  }
 
   return (
     <div className="space-y-5">
@@ -66,7 +122,9 @@ export default function SupplierProducts() {
           <Input label="Product name" value={draft.name} onChange={(v) => setDraft((d) => ({ ...d, name: v }))} placeholder="Amul Gold Milk" />
           <Input label="Unit" value={draft.unit} onChange={(v) => setDraft((d) => ({ ...d, unit: v }))} placeholder="1 L" />
           <Input label="Price (₹)" type="number" value={draft.price} onChange={(v) => setDraft((d) => ({ ...d, price: v }))} placeholder="64" />
-          <button onClick={addProduct} className="bg-jet text-surface font-medium px-5 py-3 rounded-xl h-[50px]">Add</button>
+          <button onClick={addProduct} disabled={saving} className="bg-jet text-surface font-medium px-5 py-3 rounded-xl h-[50px] inline-flex items-center justify-center gap-2 disabled:opacity-60">
+            {saving ? <Loader2 size={16} className="animate-spin" /> : 'Add'}
+          </button>
         </div>
       )}
 
@@ -90,8 +148,8 @@ export default function SupplierProducts() {
                 </div>
                 <span className="text-ink2 text-sm hidden sm:block">{p.unit}</span>
                 <div className="flex flex-wrap gap-1.5 items-center">
-                  <Toggle on={p.active} onClick={() => store.update('products', p.id, { active: !p.active })} onLabel="Listed" offLabel="Hidden" />
-                  <Toggle on={p.in_stock} onClick={() => store.update('products', p.id, { in_stock: !p.in_stock })} onLabel="In stock" offLabel="Out" tone={p.in_stock ? 'ok' : 'alert'} />
+                  <Toggle on={p.active} onClick={() => updateProduct(p.id, { active: !p.active })} onLabel="Listed" offLabel="Hidden" />
+                  <Toggle on={p.in_stock} onClick={() => updateProduct(p.id, { in_stock: !p.in_stock })} onLabel="In stock" offLabel="Out" tone={p.in_stock ? 'ok' : 'alert'} />
                   <span className="inline-flex items-center gap-1">
                     <span className="text-ink2 text-sm">₹</span>
                     {editPrice[p.id] !== undefined ? (
@@ -102,7 +160,7 @@ export default function SupplierProducts() {
                   </span>
                 </div>
                 <div className="flex gap-1.5 justify-end">
-                  <button onClick={() => store.remove('products', p.id)} className="text-ink2 hover:text-alert p-1.5 rounded-lg hover:bg-canvas"><Trash2 size={16} /></button>
+                  <button onClick={() => removeProduct(p.id)} className="text-ink2 hover:text-alert p-1.5 rounded-lg hover:bg-canvas"><Trash2 size={16} /></button>
                 </div>
               </div>
             ))}
